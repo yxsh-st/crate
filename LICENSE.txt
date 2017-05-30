@@ -1,19 +1,34 @@
-Crate
-Copyright 2013-2016 Crate.IO GmbH ("Crate")
+CrateDB
+Copyright 2013-2017 Crate.io Inc. ("Crate.io")
 
+Unauthorized copying, via any medium is strictly prohibited.
 
-Licensed to Crate.IO GmbH (referred to in this notice as "Crate")
-under one or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information regarding copyright
-ownership.
+Licensed to Crate.io Inc. ("Crate.io") under one or more contributor license
+agreements.  See the NOTICE file distributed with this work for additional
+information regarding copyright ownership.
 
-Crate licenses this software to you under the Apache License, Version 2.0.
-However, if you have executed another commercial license agreement with
-Crate these terms will supersede the license and you may use the software
-solely pursuant to the terms of the relevant commercial agreement.
+Different parts of CrateDB are available under different licences.
 
+Unless otherwise stated, every component of CrateDB is licensed under the
+Apache License, Version 2.0.
 
-=========================================================================
+Third-party components bundled with CrateDB are listed in the NOTICE file along
+with their respective license.
+
+CrateDB also includes some enterprise features.  These components are marked in
+the documentation and in their respective source files, and are not available
+under the Apache License, Version 2.0.
+
+To enable or use any of the enterprise features, Crate.io must have given you
+permission to enable and use the Enterprise Edition of CrateDB and you must
+have a valid Enterprise or Subscription Agreement with Crate.io.  If you
+enable or use features that are part of the Enterprise Edition, you represent
+and warrant that you have a valid Enterprise or Subscription Agreement with
+Crate.io.  Your use of features of the Enterprise Edition is governed by the
+terms and conditions of your Enterprise or Subscription Agreement with
+Crate.io.
+
+===============================================================================
 
 
                                  Apache License
