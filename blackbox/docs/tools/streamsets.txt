@@ -62,25 +62,40 @@ records fields.
    converted into float values. Therefore, we add an additional
    processing `Field
    Converter <https://streamsets.com/documentation/datacollector/latest/help/#Processors/FieldConverter.html#concept_is3_zkp_wq>`__
-   stage into the pipeline. [Convert string input values]({% media
-   '/media/1605/2-streamsets-dst-field-conversion.png' %})
+   stage into the pipeline.
+
+   .. image:: 2-streamsets-dst-field-conversion.png
+      :alt: Convert string input values
 
 3. Create the taxi table in Crate.
 
-``sql  CREATE TABLE taxi (      hack_license STRING,      medallion STRING,      total_amount FLOAT,      tip_amount FLOAT  );``
+   .. code-block:: psql
+
+       CREATE TABLE taxi (
+        hack_license STRING,
+        medallion STRING,
+        total_amount FLOAT,
+        tip_amount FLOAT
+       );
 
 4. The next step is to configure the Crate JDBC destination. First, load
-   the Crate JDBC driver must be loaded. [Load the Crate JDBC driver]({%
-   media '/media/1605/3-streamsets-dst-driver.png' %}) Then, we
-   configure the JDBC connection (1) and define the destination table
+   the Crate JDBC driver must be loaded.
+
+   .. image:: 3-streamsets-dst-driver.png
+      :alt: Load the Crate JDBC driver
+
+   Then, we configure the JDBC connection (1) and define the destination table
    (2). After the above-mentioned configurations steps, we still can see
    warnings in the *Credential tab*. It is solved by unchecking the user
-   authorization box because Crate does not support an authorization.
-   (3) [Configure the Crate JDBC driver]({% media
-   '/media/1605/4-streamsets-dst-jdbc-conf.png' %})
+   authorization box because Crate does not support an authorization. (3)
 
-5. Start the pipeline. [Pipelines run report]({% media
-   '/media/1605/5-streamsets-dst-output.png' %})
+   .. image:: 4-streamsets-dst-jdbc-conf.png
+      :alt: Configure the Crate JDBC driver
+
+5. Start the pipeline.
+
+   .. image:: 5-streamsets-dst-output.png
+      :alt: Pipelines run report
 
 Crate JDBC Origin
 -----------------
@@ -129,8 +144,9 @@ the data from the Crate database to CSV files.
    more detail information on how to set the offset value and column see
    the StreamSets
    `documentation <https://streamsets.com/documentation/datacollector/1.1.3/help/#Origins/JDBCConsumer.html#concept_nxz_2kz_bs>`__.
-   [Configure the Crate JDBC driver]({% media
-   '/media/1605/3-streamsets-source-jdbc.png' %})
+
+   .. image:: 3-streamsets-source-jdbc.png
+      :alt: Configure the Crate JDBC driver
 
 **IMPORTANT**
 
@@ -141,12 +157,15 @@ the data from the Crate database to CSV files.
 2. We stream the records from Crate to CSV files. In order to accomplish
    that we provide the path where the files are going to be created and
    set the output file format in the directory origin to *Delimited*.
-   [Configure CSV destination]({% media
-   '/media/1605/4-streamsets-source-fs-conf1.png' %})
+
+   .. image:: 4-streamsets-source-fs-conf1.png
+      :alt: Configure CSV destination
 
 3. Now we can start the pipeline and see rankings data streaming
-   statistics form the Crate database to CSV files. [Crate to CSV
-   report]({% media '/media/1605/6-streamsets-origin-report.png' %})
+   statistics form the Crate database to CSV files.
+
+   .. image:: 6-streamsets-origin-report.png
+      :alt: Crate to CSV report
 
 -  `Download StreamSets <https://streamsets.com/opensource/>`__
 -  `StreamSets Official
