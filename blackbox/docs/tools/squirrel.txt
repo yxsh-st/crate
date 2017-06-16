@@ -2,7 +2,7 @@
 Using Crate with SQuirreL SQL
 =============================
 
-**`SQuirreL <http://www.squirrelsql.org/>`__** is a graphical SQL client
+`SQuirreL <http://www.squirrelsql.org/>`_ is a graphical SQL client
 application that can be used to browse and query a JDBC compliant
 database.
 
@@ -12,27 +12,30 @@ with SQUirreL.
 Setup
 -----
 
-`SQuirreL <http://www.squirrelsql.org/>`__ does not provide a Crate
+`SQuirreL <http://www.squirrelsql.org/>`_ does not provide a Crate
 driver with its distribution, so an extra setup step is required to run
-Crate with `SQuirreL <http://www.squirrelsql.org/>`__:
+Crate with `SQuirreL <http://www.squirrelsql.org/>`_:
 
 1. Copy the `Crate JDBC
-   standalone <https://bintray.com/crate/crate/crate-jdbc/view/files/io/crate/crate-jdbc-standalone>`__
+   standalone <https://bintray.com/crate/crate/crate-jdbc/view/files/io/crate/crate-jdbc-standalone>`_
    jar to the SQuirreL lib folder. On OS X, when installing SQuirreL
    with the MaxOS X installer, this is
    ``/Applications/SQuirreLSQL.app/Contents/Resources/Java/lib/``
 
-2. Start `SQuirreL <http://www.squirrelsql.org/>`__.
+2. Start `SQuirreL <http://www.squirrelsql.org/>`_.
 
 3. Choose the ``Drivers`` tab and add a new driver, adding the following
-   information into the form and confirm by pressing ok. [squirrel add
-   driver dialogue]({% media '/media/1602/squirrel\_add\_driver.png' %})
+   information into the form and confirm by pressing ok.
+
+   .. image:: squirrel_add_driver.png
+      :alt: squirrel add driver dialogue
 
 4. Choose the ``Aliases`` tab and add a new Alias, Choose your new
    driver (called crate in our example) and enter your database URL.
    Username and password are not supported, so leave them blank.
-   [squirrel add alias dialogue]({% media
-   '/media/1602/squirrel\_add\_alias.png' %})
+
+   .. image:: squirrel_add_alias.png
+      :alt: squirrel add alias dialogue
 
 5. Connect your alias to your crate instance.
 
@@ -43,17 +46,17 @@ You can browse Crate using the Object Tree Worksheet, that is the usual
 view you use for browsing your tables and get information about their
 schema.
 
-[browsing the content and schema of a table using squirrel]({% media
-'/media/1602/squirrel\_view.png' %})
+.. image:: squirrel_view.png
+  :alt: browsing the content and schema of a table using squirrel
 
 When browsing a table’s content using Content, it is possible to edit
 the table contents by right-clicking and choosing Make Editable.
 
-[editing the content of a table using squirrel]({% media
-'/media/1602/squirrel\_edit.png' %})
+.. image:: squirrel_edit.png
+  :alt: editing the content of a table using squirrel
 
 Using the SQuirreL SQL Editor it is possible to execute arbitrary SQL
 commands and scripts.
 
-[using the squirrel sql editor]({% media '/media/1602/squirrel\_sql.png'
-%})
+.. image:: squirrel_sql.png
+  :alt: using the squirrel sql editor
