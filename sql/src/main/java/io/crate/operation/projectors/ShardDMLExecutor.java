@@ -64,16 +64,15 @@ public class ShardDMLExecutor<TReq extends ShardRequest<TReq, TItem>, TItem exte
     private final int bulkSize;
     private final ScheduledExecutorService scheduler;
     private final BitSet responses;
-    private final NodeJobsCounter nodeJobsCounter;
     private final AtomicInteger pendingItemsCount = new AtomicInteger(0);
     private final Consumer<Row> rowConsumer;
     private final BooleanSupplier backpressureTrigger;
     private final Function<Boolean, CompletableFuture<BitSet>> execute;
     private final String localNodeId;
+    private final CompletableFuture<Void> executionFuture = new CompletableFuture<>();
 
     private TReq currentRequest;
     private int numItems = -1;
-    private CompletableFuture<Void> executionFuture = new CompletableFuture<>();
 
     public ShardDMLExecutor(int bulkSize,
                             ScheduledExecutorService scheduler,
@@ -85,13 +84,13 @@ public class ShardDMLExecutor<TReq extends ShardRequest<TReq, TItem>, TItem exte
                             BiConsumer<TReq, ActionListener<ShardResponse>> transportAction) {
         this.bulkSize = bulkSize;
         this.scheduler = scheduler;
-        this.nodeJobsCounter = nodeJobsCounter;
         this.responses = new BitSet();
         this.currentRequest = requestFactory.get();
         this.localNodeId = getLocalNodeId(clusterService);
 
         this.rowConsumer = createRowConsumer(uidExpression, itemFactory);
-        this.backpressureTrigger = createBackpressureTrigger();
+        this.backpressureTrigger = () ->
+            nodeJobsCounter.getInProgressJobsForNode(localNodeId) < MAX_NODE_CONCURRENT_OPERATIONS;
         this.execute = createExecuteFunction(scheduler, nodeJobsCounter, requestFactory, transportAction);
     }
 
@@ -102,16 +101,6 @@ public class ShardDMLExecutor<TReq extends ShardRequest<TReq, TItem>, TItem exte
             uidExpression.setNextRow(row);
             currentRequest.add(numItems, itemFactory.apply(((BytesRef) uidExpression.value()).utf8ToString()));
         };
-    }
-
-    private BooleanSupplier createBackpressureTrigger() {
-        return () -> {
-            return !isExecutionPossible(localNodeId);
-        };
-    }
-
-    private boolean isExecutionPossible(String nodeId) {
-        return nodeJobsCounter.getInProgressJobsForNode(nodeId) < MAX_NODE_CONCURRENT_OPERATIONS;
     }
 
     private Function<Boolean, CompletableFuture<BitSet>> createExecuteFunction(ScheduledExecutorService scheduler,
