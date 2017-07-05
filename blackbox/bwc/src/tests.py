@@ -6,6 +6,8 @@ import unittest
 import tempfile
 import shutil
 import time
+import os
+import glob
 from typing import NamedTuple
 from io import BytesIO
 from testutils.paths import project_root
@@ -17,17 +19,18 @@ from crate.client import connect
 from cr8.run_crate import CrateNode, get_crate
 
 
-
 class VersionDef(NamedTuple):
     version: str
     upgrade_segments: bool
 
 
+CURRENT_TARBALL = next(iter(
+    glob.glob(os.path.join(project_root, 'app', 'build', 'distributions', '*.tar.gz'))))
 VERSIONS = (
     VersionDef('1.0.x', False),
     VersionDef('1.1.x', True),
     VersionDef('2.0.x', False),
-    VersionDef(project_root, False)
+    VersionDef(CURRENT_TARBALL, False)
 )
 TABLE_WITH_MOST_TYPES = '''
 create table t1 (
@@ -144,15 +147,31 @@ class BwcTest(unittest.TestCase):
             print(f'# Starting: {version}')
             node = self._new_node(version)
             node.start()
+            blob_path = None
             with connect(node.http_url) as conn:
                 cursor = conn.cursor()
                 wait_for_active_shards(cursor)
+                for root, dirs, files in os.walk(self._path_data):
+                    if files:
+                        for fi in files:
+                            if fi == digest:
+                                blob_path = os.path.join(root, fi)
+                                print('Blob: ', blob_path)
+                                break
                 if upgrade_segments:
                     cursor.execute('optimize table t1 with (upgrade_segments = true)')
                     cursor.execute('optimize table blob.b1 with (upgrade_segments = true)')
                 blobs = conn.get_blob_container('b1')
-                run_selects(cursor, blobs, digest)
+                try:
+                    run_selects(cursor, blobs, digest)
+                except Exception as e:
+                    print('  FAILURE:', str(e))
+            if blob_path:
+                print('Blob still there?', os.path.exists(blob_path))
+            print('# Stopping node:', version)
             self._process_on_stop()
+            if blob_path:
+                print('Blob still there?', os.path.exists(blob_path))
 
 
 def test_suite():

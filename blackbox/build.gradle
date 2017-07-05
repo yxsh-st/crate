@@ -85,7 +85,7 @@ monitoringTest.dependsOn(unpackDistTar, bootstrap, lessLogging, ignoreDiskThresh
 itest.dependsOn(unpackDistTar, bootstrap, lessLogging, ignoreDiskThreshold)
 gtest.dependsOn(unpackDistTar, bootstrap, lessLogging, ignoreDiskThreshold)
 logicTest.dependsOn(unpackDistTar, bootstrap, lessLogging, ignoreDiskThreshold)
-bwcTest.dependsOn(bootstrap)
+bwcTest.dependsOn(bootstrap, project(':app').distTar)
 
 task cleanDocs {
     doLast {
