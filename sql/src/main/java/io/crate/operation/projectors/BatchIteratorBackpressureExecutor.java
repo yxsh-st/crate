@@ -62,7 +62,7 @@ public class BatchIteratorBackpressureExecutor<R> {
     private final CompletableFuture<Void> resultFuture = new CompletableFuture<>();
     private final Semaphore semaphore = new Semaphore(1);
 
-    private int indexInBulk = -1;
+    private int indexInBulk = 0;
     private volatile boolean consumptionFinished = false;
 
     public BatchIteratorBackpressureExecutor(BatchIterator batchIterator,
@@ -134,16 +134,9 @@ public class BatchIteratorBackpressureExecutor<R> {
 
                 if (indexInBulk == bulkSize) {
                     if (pauseConsumption.getAsBoolean()) {
-                        scheduler.schedule(
-                            () -> {
-                                // release semaphore after throttle delay has passed to make sure other concurrent
-                                // active operations don't resume the consumption earlier
-                                semaphore.release();
-                                consumeIterator();
-                            },
-                            throttleDelay.next().getMillis(),
-                            TimeUnit.MILLISECONDS
-                        );
+                        // release semaphore inside resumeConsumption: after throttle delay has passed
+                        // to make sure callbacks of previously triggered async operations don't resume consumption
+                        scheduler.schedule(this::resumeConsumption, throttleDelay.next().getMillis(), TimeUnit.MILLISECONDS);
                         return;
                     }
                     executeBatch();
@@ -166,8 +159,18 @@ public class BatchIteratorBackpressureExecutor<R> {
     }
 
     private void executeBatch() {
-        indexInBulk = -1;
+        indexInBulk = 0;
         inFlightExecutions.incrementAndGet();
         executeFunction.apply(false).whenComplete(continueConsumptionOrFinish);
+    }
+
+    private void resumeConsumption() {
+        if (pauseConsumption.getAsBoolean()) {
+            scheduler.schedule(this::resumeConsumption, throttleDelay.next().getMillis(), TimeUnit.MILLISECONDS);
+            return;
+        }
+        semaphore.release();
+        executeBatch();
+        consumeIterator();
     }
 }
