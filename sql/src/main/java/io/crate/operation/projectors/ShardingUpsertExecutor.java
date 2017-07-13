@@ -199,13 +199,16 @@ public class ShardingUpsertExecutor<TReq extends ShardRequest<TReq, TItem>, TIte
 
     @Override
     public CompletableFuture<? extends Iterable<Row>> apply(BatchIterator batchIterator) {
-        executionFuture = new CompletableFuture<>();
-        new BatchIteratorBackpressureExecutor<>(batchIterator, scheduler,
-            rowConsumer, execute, backpressureTrigger, bulkSize, BACKOFF_POLICY, executionFuture).
-            consumeIteratorAndExecute();
-
-        return executionFuture.
-            thenApply(ignored -> Collections.singletonList(new Row1((long) responses.cardinality())));
+        return new BatchIteratorBackpressureExecutor<>(
+            batchIterator,
+            scheduler,
+            rowConsumer,
+            execute,
+            backpressureTrigger,
+            bulkSize,
+            BACKOFF_POLICY
+        ).consumeIteratorAndExecute()
+            .thenApply(ignored -> Collections.singletonList(new Row1((long) responses.cardinality())));
     }
 
     @Nullable
