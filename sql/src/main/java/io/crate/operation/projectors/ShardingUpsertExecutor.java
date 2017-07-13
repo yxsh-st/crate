@@ -103,7 +103,6 @@ public class ShardingUpsertExecutor<TReq extends ShardRequest<TReq, TItem>, TIte
     private final Consumer<Row> rowConsumer;
     private final BooleanSupplier backpressureTrigger;
     private final Function<Boolean, CompletableFuture<BitSet>> execute;
-    private CompletableFuture<Void> executionFuture;
 
     public ShardingUpsertExecutor(ClusterService clusterService,
                                   NodeJobsCounter nodeJobsCounter,
@@ -284,8 +283,13 @@ public class ShardingUpsertExecutor<TReq extends ShardRequest<TReq, TItem>, TIte
                 @Override
                 public void onResponse(ShardResponse shardResponse) {
                     nodeJobsCounter.decrement(shardLocation.nodeId);
-                    processShardResponse(shardResponse);
-                    countdown();
+                    Exception failure = shardResponse.failure();
+                    if (failure != null && failure instanceof InterruptedException) {
+                        bulkResultFuture.completeExceptionally(failure);
+                    } else {
+                        processShardResponse(shardResponse);
+                        countdown();
+                    }
                 }
 
                 @Override
@@ -317,11 +321,6 @@ public class ShardingUpsertExecutor<TReq extends ShardRequest<TReq, TItem>, TIte
     }
 
     private void processShardResponse(ShardResponse shardResponse) {
-        Exception responseFailure = shardResponse.failure();
-        if (responseFailure != null && responseFailure instanceof InterruptedException) {
-            // abort operation completely as it's been killed
-            executionFuture.completeExceptionally(responseFailure);
-        }
         synchronized (responses) {
             ShardResponse.markResponseItemsAndFailures(shardResponse, responses);
         }
