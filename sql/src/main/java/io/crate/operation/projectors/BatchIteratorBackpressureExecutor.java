@@ -151,8 +151,10 @@ public class BatchIteratorBackpressureExecutor<R> {
             } else {
                 batchIterator.loadNextBatch()
                      // consumption can only be continued after loadNextBatch completes; so keep permit until then.
-                    .whenComplete((r, f) -> semaphore.release())
-                    .whenComplete(continueConsumptionOrFinish);
+                    .whenComplete((r, f) -> {
+                        semaphore.release();
+                        continueConsumptionOrFinish.accept(r, f);
+                    });
             }
         } catch (Throwable t) {
             // semaphore may be unreleased, but we're finished anyway.
@@ -172,8 +174,8 @@ public class BatchIteratorBackpressureExecutor<R> {
             scheduler.schedule(this::resumeConsumption, throttleDelay.next().getMillis(), TimeUnit.MILLISECONDS);
             return;
         }
-        semaphore.release();
         executeBatch();
+        semaphore.release();
         consumeIterator();
     }
 }
