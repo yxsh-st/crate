@@ -144,12 +144,15 @@ public class BatchIteratorBackpressureExecutor<R> {
             }
 
             inFlightExecutions.incrementAndGet();
-            semaphore.release();
             if (batchIterator.allLoaded()) {
+                semaphore.release();
                 consumptionFinished = true;
                 executeFunction.apply(true).whenComplete(continueConsumptionOrFinish);
             } else {
-                batchIterator.loadNextBatch().whenComplete(continueConsumptionOrFinish);
+                batchIterator.loadNextBatch()
+                     // consumption can only be continued after loadNextBatch completes; so keep permit until then.
+                    .whenComplete((r, f) -> semaphore.release())
+                    .whenComplete(continueConsumptionOrFinish);
             }
         } catch (Throwable t) {
             // semaphore may be unreleased, but we're finished anyway.
