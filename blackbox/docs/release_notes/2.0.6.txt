@@ -21,8 +21,8 @@ Released on 2017/07/19.
 
 .. WARNING::
 
-   If you're using CrateDB's BLOB storage you should consult the
-   `Upgrade Notes`_.
+   If you're using CrateDB's BLOB storage you should consult the `Upgrade
+   Notes`_.
 
 .. WARNING::
 
