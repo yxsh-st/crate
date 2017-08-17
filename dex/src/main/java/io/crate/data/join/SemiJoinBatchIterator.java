@@ -23,11 +23,9 @@
 package io.crate.data.join;
 
 import io.crate.data.BatchIterator;
-import io.crate.data.Columns;
 
 import java.util.concurrent.CompletionStage;
-import java.util.function.BooleanSupplier;
-import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * <pre>
@@ -40,15 +38,16 @@ import java.util.function.Function;
  *     }
  * </pre>
  */
-class SemiJoinBatchIterator extends NestedLoopBatchIterator {
+class SemiJoinBatchIterator<L, R, C> extends NestedLoopBatchIterator<L, R, C> {
 
-    protected final BooleanSupplier joinCondition;
+    final Predicate<C> joinCondition;
 
-    SemiJoinBatchIterator(BatchIterator left,
-                          BatchIterator right,
-                          Function<Columns, BooleanSupplier> joinCondition) {
-        super(left, right);
-        this.joinCondition = joinCondition.apply(rowData);
+    SemiJoinBatchIterator(BatchIterator<L> left,
+                          BatchIterator<R> right,
+                          ElementCombiner<L, R, C> combiner,
+                          Predicate<C> joinCondition) {
+        super(left, right, combiner);
+        this.joinCondition = joinCondition;
     }
 
     @Override
@@ -69,12 +68,6 @@ class SemiJoinBatchIterator extends NestedLoopBatchIterator {
     @Override
     public CompletionStage<?> loadNextBatch() {
         return super.loadNextBatch();
-    }
-
-    // We only need the data from the left iterator
-    @Override
-    public Columns rowData() {
-        return left.rowData();
     }
 
     private boolean moveLeftSide() {
@@ -98,7 +91,7 @@ class SemiJoinBatchIterator extends NestedLoopBatchIterator {
      */
     protected Boolean tryAdvanceRight() {
         while (right.moveNext()) {
-            if (joinCondition.getAsBoolean()) {
+            if (joinCondition.test(currentElement())) {
                 right.moveToStart();
                 activeIt = left;
                 return true;

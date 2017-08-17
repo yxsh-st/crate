@@ -33,50 +33,49 @@ import java.util.concurrent.CompletionStage;
 /**
  * BatchIterator implementation that is backed by {@link Iterable<Row>}.
  */
-public class RowsBatchIterator implements BatchIterator {
+public class InMemoryBatchIterator<T> implements BatchIterator<T> {
 
-    private final RowColumns rowData;
-    private final Iterable<? extends Row> rows;
+    private final Iterable<? extends T> items;
 
-    private Iterator<? extends Row> it;
+    private Iterator<? extends T> it;
+    private T current;
 
-    public static BatchIterator empty(int numCols) {
-        return newInstance(Collections.emptyList(), numCols);
+    public static <T> BatchIterator<T> empty() {
+        return newInstance(Collections.emptyList());
     }
 
-    public static BatchIterator newInstance(Row row) {
-        return newInstance(Collections.singletonList(row), row.numColumns());
+    public static <T> BatchIterator<T> newInstance(T item) {
+        return newInstance(Collections.singletonList(item));
     }
 
-    public static BatchIterator newInstance(Iterable<? extends Row> rows, int numCols) {
-        return new CloseAssertingBatchIterator(new RowsBatchIterator(rows, numCols));
+    public static <T> BatchIterator<T> newInstance(Iterable<? extends T> items) {
+        return new CloseAssertingBatchIterator<>(new InMemoryBatchIterator<>(items));
     }
 
     @VisibleForTesting
-    RowsBatchIterator(Iterable<? extends Row> rows, int numCols) {
-        rowData = new RowColumns(numCols);
-        this.rows = rows;
-        this.it = rows.iterator();
+    InMemoryBatchIterator(Iterable<? extends T> items) {
+        this.items = items;
+        this.it = items.iterator();
     }
 
     @Override
-    public Columns rowData() {
-        return rowData;
+    public T currentElement() {
+        return current;
     }
 
     @Override
     public void moveToStart() {
-        it = rows.iterator();
-        rowData.updateRef(RowBridging.OFF_ROW);
+        it = items.iterator();
+        current = null;
     }
 
     @Override
     public boolean moveNext() {
         if (it.hasNext()) {
-            rowData.updateRef(it.next());
+            current = it.next();
             return true;
         }
-        rowData.updateRef(RowBridging.OFF_ROW);
+        current = null;
         return false;
     }
 

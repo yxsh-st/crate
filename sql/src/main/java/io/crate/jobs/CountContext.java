@@ -22,10 +22,10 @@
 package io.crate.jobs;
 
 import io.crate.analyze.WhereClause;
-import io.crate.data.BatchConsumer;
+import io.crate.data.RowConsumer;
 import io.crate.data.BatchIterator;
 import io.crate.data.Row1;
-import io.crate.data.RowsBatchIterator;
+import io.crate.data.InMemoryBatchIterator;
 import io.crate.operation.count.CountOperation;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.common.logging.Loggers;
@@ -42,14 +42,14 @@ public class CountContext extends AbstractExecutionSubContext {
     private static final Logger LOGGER = Loggers.getLogger(CountContext.class);
 
     private final CountOperation countOperation;
-    private final BatchConsumer consumer;
+    private final RowConsumer consumer;
     private final Map<String, List<Integer>> indexShardMap;
     private final WhereClause whereClause;
     private CompletableFuture<Long> countFuture;
 
     public CountContext(int id,
                         CountOperation countOperation,
-                        BatchConsumer consumer,
+                        RowConsumer consumer,
                         Map<String, List<Integer>> indexShardMap,
                         WhereClause whereClause) {
         super(id, LOGGER);
@@ -67,7 +67,7 @@ public class CountContext extends AbstractExecutionSubContext {
             throw new RuntimeException(e);
         }
         countFuture.whenComplete((rowCount, failure) -> {
-            BatchIterator iterator = rowCount == null ? null : RowsBatchIterator.newInstance(new Row1(rowCount));
+            BatchIterator iterator = rowCount == null ? null : InMemoryBatchIterator.newInstance(new Row1(rowCount));
             consumer.accept(iterator, failure);
             close(failure);
         });

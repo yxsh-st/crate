@@ -23,10 +23,8 @@
 package io.crate.data.join;
 
 import io.crate.data.BatchIterator;
-import io.crate.data.Columns;
 
-import java.util.function.BooleanSupplier;
-import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * <pre>
@@ -39,12 +37,13 @@ import java.util.function.Function;
  *     }
  * </pre>
  */
-class AntiJoinBatchIterator extends SemiJoinBatchIterator {
+class AntiJoinBatchIterator<L, R, C> extends SemiJoinBatchIterator<L, R, C> {
 
-    AntiJoinBatchIterator(BatchIterator left,
-                          BatchIterator right,
-                          Function<Columns, BooleanSupplier> joinCondition) {
-        super(left, right, joinCondition);
+    AntiJoinBatchIterator(BatchIterator<L> left,
+                          BatchIterator<R> right,
+                          ElementCombiner<L, R, C> combiner,
+                          Predicate<C> joinCondition) {
+        super(left, right, combiner, joinCondition);
     }
 
     /**
@@ -56,7 +55,7 @@ class AntiJoinBatchIterator extends SemiJoinBatchIterator {
      */
     protected Boolean tryAdvanceRight() {
         while (right.moveNext()) {
-            if (joinCondition.getAsBoolean()) {
+            if (joinCondition.test(currentElement())) {
                 right.moveToStart();
                 activeIt = left;
                 return null;

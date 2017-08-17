@@ -22,14 +22,14 @@
 
 package io.crate.operation.collect.collectors;
 
-import io.crate.data.BatchConsumer;
 import io.crate.data.CollectionBucket;
 import io.crate.data.CompositeBatchIterator;
-import io.crate.data.RowsBatchIterator;
+import io.crate.data.InMemoryBatchIterator;
+import io.crate.data.RowConsumer;
 import io.crate.test.integration.CrateUnitTest;
-import io.crate.testing.TestingBatchConsumer;
 import io.crate.testing.TestingBatchIterators;
 import io.crate.testing.TestingHelpers;
+import io.crate.testing.TestingRowConsumer;
 import org.junit.Test;
 
 import java.util.List;
@@ -40,8 +40,8 @@ public class MultiConsumerTest extends CrateUnitTest {
 
     @Test
     public void testSuccessfulMultiConsumerUsage() throws Exception {
-        TestingBatchConsumer batchConsumer = new TestingBatchConsumer();
-        BatchConsumer consumer = new CompositeCollector.MultiConsumer(2, batchConsumer, CompositeBatchIterator::new);
+        TestingRowConsumer batchConsumer = new TestingRowConsumer();
+        RowConsumer consumer = new CompositeCollector.MultiConsumer(2, batchConsumer, CompositeBatchIterator::new);
 
         consumer.accept(TestingBatchIterators.range(3, 6), null);
         consumer.accept(TestingBatchIterators.range(0, 3), null);
@@ -58,10 +58,10 @@ public class MultiConsumerTest extends CrateUnitTest {
 
     @Test
     public void testFirstAcceptNullIteratorDoesNotCauseNPE() throws Exception {
-        TestingBatchConsumer batchConsumer = new TestingBatchConsumer();
-        BatchConsumer consumer = new CompositeCollector.MultiConsumer(2, batchConsumer, CompositeBatchIterator::new);
+        TestingRowConsumer batchConsumer = new TestingRowConsumer();
+        RowConsumer consumer = new CompositeCollector.MultiConsumer(2, batchConsumer, CompositeBatchIterator::new);
         consumer.accept(null, new IllegalStateException("dummy"));
-        consumer.accept(RowsBatchIterator.empty(1), null);
+        consumer.accept(InMemoryBatchIterator.empty(), null);
 
         expectedException.expect(IllegalStateException.class);
         expectedException.expectMessage("dummy");
