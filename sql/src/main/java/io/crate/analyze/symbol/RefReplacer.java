@@ -26,6 +26,8 @@ import io.crate.metadata.Reference;
 
 import java.util.function.Function;
 
+import static java.util.Objects.requireNonNull;
+
 public final class RefReplacer extends FunctionCopyVisitor<Function<? super Reference, ? extends Symbol>> {
 
     private final static RefReplacer REPLACER = new RefReplacer();
@@ -34,12 +36,17 @@ public final class RefReplacer extends FunctionCopyVisitor<Function<? super Refe
         super();
     }
 
+    public static io.crate.analyze.symbol.Function replaceRefs(io.crate.analyze.symbol.Function func,
+                                                               Function<? super Reference, ? extends Symbol> replaceFunc) {
+        return (io.crate.analyze.symbol.Function) REPLACER.process(func, replaceFunc);
+    }
+
     public static Symbol replaceRefs(Symbol tree, Function<? super Reference, ? extends Symbol> replaceFunc) {
         return REPLACER.process(tree, replaceFunc);
     }
 
     @Override
     public Symbol visitReference(Reference ref, Function<? super Reference, ? extends Symbol> replaceFunc) {
-        return replaceFunc.apply(ref);
+        return requireNonNull(replaceFunc.apply(ref), "mapper function used in RefReplacer must not return null values");
     }
 }

@@ -20,25 +20,24 @@
  * agreement.
  */
 
-package io.crate.analyze.expressions;
+package io.crate.analyze.symbol;
 
-import io.crate.analyze.relations.QueriedRelation;
-import io.crate.analyze.relations.RelationAnalyzer;
-import io.crate.analyze.relations.StatementAnalysisContext;
-import io.crate.sql.tree.Query;
+public final class FuncSymbols {
 
-public class SubqueryAnalyzer {
-
-    private final RelationAnalyzer relationAnalyzer;
-    private final StatementAnalysisContext statementAnalysisContext;
-
-    public SubqueryAnalyzer(RelationAnalyzer relationAnalyzer, StatementAnalysisContext statementAnalysisContext) {
-        this.relationAnalyzer = relationAnalyzer;
-        this.statementAnalysisContext = statementAnalysisContext;
+    /**
+     * Apply the mapper function on all nodes in a symbolTree.
+     */
+    public static Symbol mapNodes(Symbol st, java.util.function.Function<? super Function, ? extends Symbol> mapper) {
+        return Visitor.INSTANCE.process(st, mapper);
     }
 
-    public QueriedRelation analyze(Query query) {
-        // The only non-queried relations are base tables - which cannot occur as part of a subquery. so this cast is safe.
-        return (QueriedRelation) relationAnalyzer.analyze(query, statementAnalysisContext);
+    private static class Visitor extends FunctionCopyVisitor<java.util.function.Function<? super Function, ? extends Symbol>> {
+
+        private static final Visitor INSTANCE = new Visitor();
+
+        @Override
+        public Symbol visitFunction(Function func, java.util.function.Function<? super Function, ? extends Symbol> mapper) {
+            return mapper.apply(processAndMaybeCopy(func, mapper));
+        }
     }
 }
