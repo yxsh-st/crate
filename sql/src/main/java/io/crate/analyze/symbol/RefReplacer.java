@@ -28,6 +28,8 @@ import io.crate.metadata.ReplacingSymbolVisitor;
 
 import java.util.function.Function;
 
+import static java.util.Objects.requireNonNull;
+
 public final class RefReplacer extends ReplacingSymbolVisitor<Function<? super Reference, ? extends Symbol>> {
 
     private final static RefReplacer REPLACER = new RefReplacer();
@@ -42,6 +44,6 @@ public final class RefReplacer extends ReplacingSymbolVisitor<Function<? super R
 
     @Override
     public Symbol visitReference(Reference ref, Function<? super Reference, ? extends Symbol> replaceFunc) {
-        return replaceFunc.apply(ref);
+        return requireNonNull(replaceFunc.apply(ref), "mapper function used in RefReplacer must not return null values");
     }
 }

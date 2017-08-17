@@ -21,6 +21,7 @@
 
 package io.crate.analyze;
 
+import io.crate.analyze.symbol.Literal;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.data.Input;
 import org.elasticsearch.common.Nullable;
@@ -78,7 +79,12 @@ public abstract class QueryClause {
         if (hasQuery()) {
             Symbol newQuery = replaceFunction.apply(query);
             if (query != newQuery) {
-                query = newQuery;
+                if (newQuery instanceof Literal) {
+                    noMatch = !((boolean) ((Literal) newQuery).value());
+                    query = null;
+                } else {
+                    query = newQuery;
+                }
             }
         }
     }

@@ -20,25 +20,37 @@
  * agreement.
  */
 
-package io.crate.analyze.expressions;
+package io.crate.planner.consumer;
 
-import io.crate.analyze.relations.QueriedRelation;
-import io.crate.analyze.relations.RelationAnalyzer;
-import io.crate.analyze.relations.StatementAnalysisContext;
-import io.crate.sql.tree.Query;
+import io.crate.analyze.symbol.Symbol;
+import io.crate.test.integration.CrateDummyClusterServiceUnitTest;
+import io.crate.testing.SQLExecutor;
+import io.crate.testing.T3;
+import org.junit.Before;
+import org.junit.Test;
 
-public class SubqueryAnalyzer {
+import static org.hamcrest.Matchers.is;
 
-    private final RelationAnalyzer relationAnalyzer;
-    private final StatementAnalysisContext statementAnalysisContext;
+public class SemiJoinsTest extends CrateDummyClusterServiceUnitTest {
 
-    public SubqueryAnalyzer(RelationAnalyzer relationAnalyzer, StatementAnalysisContext statementAnalysisContext) {
-        this.relationAnalyzer = relationAnalyzer;
-        this.statementAnalysisContext = statementAnalysisContext;
+    private SQLExecutor executor;
+
+    @Before
+    public void initExecutor() throws Exception {
+        executor = SQLExecutor.builder(clusterService)
+            .addDocTable(T3.T1_INFO)
+            .addDocTable(T3.T2_INFO)
+            .addDocTable(T3.T3_INFO)
+            .build();
     }
 
-    public QueriedRelation analyze(Query query) {
-        // The only non-queried relations are base tables - which cannot occur as part of a subquery. so this cast is safe.
-        return (QueriedRelation) relationAnalyzer.analyze(query, statementAnalysisContext);
+    private Symbol asSymbol(String expression) {
+        return executor.asSymbol(T3.SOURCES, expression);
+    }
+
+    @Test
+    public void testGatherRewriteCandidates() throws Exception {
+        Symbol query = asSymbol("a in (select 'foo')");
+        assertThat(SemiJoins.gatherRewriteCandidates(query).size(), is(1));
     }
 }
