@@ -40,6 +40,7 @@ import io.crate.metadata.table.Operation;
 import io.crate.operation.operator.Operator;
 import io.crate.operation.operator.OrOperator;
 import io.crate.operation.operator.any.AnyOperator;
+import io.crate.operation.predicate.NotPredicate;
 import io.crate.planner.node.dql.join.JoinType;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
@@ -209,7 +210,7 @@ public class SemiJoins {
             /* Cannot rewrite a `op ANY subquery` expression into a semi-join if it's beneath a OR because
              * `op ANY subquery` has different semantics in case of NULL values than a semi-join would have
              */
-            if (funcName.equals(OrOperator.NAME)) {
+            if (funcName.equals(OrOperator.NAME) || funcName.equals(NotPredicate.NAME)) {
                 candidates.clear();
                 return false;
             }
