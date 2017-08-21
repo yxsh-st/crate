@@ -22,6 +22,10 @@
 
 package io.crate.planner.consumer;
 
+import io.crate.analyze.SelectAnalyzedStatement;
+import io.crate.analyze.relations.QueriedRelation;
+import io.crate.analyze.symbol.Function;
+import io.crate.analyze.symbol.SelectSymbol;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.test.integration.CrateDummyClusterServiceUnitTest;
 import io.crate.testing.SQLExecutor;
@@ -29,6 +33,9 @@ import io.crate.testing.T3;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.List;
+
+import static io.crate.testing.TestingHelpers.isSQL;
 import static org.hamcrest.Matchers.is;
 
 public class SemiJoinsTest extends CrateDummyClusterServiceUnitTest {
@@ -44,13 +51,49 @@ public class SemiJoinsTest extends CrateDummyClusterServiceUnitTest {
             .build();
     }
 
-    private Symbol asSymbol(String expression) {
-        return executor.asSymbol(T3.SOURCES, expression);
+    private <T extends Symbol> T asSymbol(String expression) {
+        //noinspection unchecked - for tests it's okay to do nasty casts
+        return (T) executor.asSymbol(T3.SOURCES, expression);
     }
 
     @Test
-    public void testGatherRewriteCandidates() throws Exception {
+    public void testGatherRewriteCandidatesSingle() throws Exception {
         Symbol query = asSymbol("a in (select 'foo')");
         assertThat(SemiJoins.gatherRewriteCandidates(query).size(), is(1));
+    }
+
+    @Test
+    public void testGatherRewriteCandidatesTwo() throws Exception {
+        Symbol query = asSymbol("a in (select 'foo') and a = 'foo' and x in (select 1)");
+        List<Function> candidates = SemiJoins.gatherRewriteCandidates(query);
+        assertThat(candidates.size(), is(2));
+
+        for (Function candidate : candidates) {
+            assertThat(candidate.info().ident().name(), is("any_="));
+        }
+    }
+
+    @Test
+    public void testMakeJoinConditionWith() throws Exception {
+        SelectAnalyzedStatement stmt = executor.analyze("select * from t1 where a in (select 'foo')");
+        QueriedRelation rel = stmt.relation();
+        Function query = (Function) rel.querySpec().where().query();
+
+        SelectSymbol subquery = SemiJoins.getSubquery(query.arguments().get(1));
+        Symbol joinCondition = SemiJoins.makeJoinCondition(query, rel, subquery.relation());
+
+        assertThat(joinCondition, isSQL("(doc.t1.a = doc.empty_row.'foo')"));
+    }
+
+    @Test
+    public void testRewriteOfWhereClause() throws Exception {
+        SelectAnalyzedStatement stmt = executor.analyze("select * from t1 where a in (select 'foo') and x = 10");
+        QueriedRelation rel = stmt.relation();
+
+        QueriedRelation semiJoin = SemiJoins.tryRewrite(rel);
+
+        assertThat(
+            semiJoin.querySpec().where(),
+            isSQL("WhereClause{query=true AND Field{QueriedTable{DocTableRelation{doc.t1}}.x, type=integer} = 10}"));
     }
 }

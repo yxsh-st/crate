@@ -103,9 +103,7 @@ public class SemiJoins {
         Symbol joinCondition;
 
         try {
-            joinCondition = makeJoinCondition(
-                (Function) RefReplacer.replaceRefs(rewriteCandidate, r -> rel.getField(r.ident().columnIdent(), Operation.READ)),
-                selectSymbol.relation());
+            joinCondition = makeJoinCondition(rewriteCandidate, rel, selectSymbol.relation());
         } catch (Exception e) {
             /* TODO: Remove this limitation
 
@@ -155,7 +153,7 @@ public class SemiJoins {
     }
 
     @Nullable
-    private static SelectSymbol getSubquery(Symbol symbol) {
+    static SelectSymbol getSubquery(Symbol symbol) {
         // TODO: need to properly unwrap casts
         // and maybe not add them in the first place if unnecessary
         if (symbol instanceof Function && ((Function) symbol).info().ident().name().startsWith("to_")) {
@@ -173,7 +171,12 @@ public class SemiJoins {
     /**
      * t1.x IN (select y from t2)  --> SEMI JOIN t1 on t1.x = t2.y
      */
-    private static Symbol makeJoinCondition(Function rewriteCandidate, QueriedRelation subQuery) {
+    static Symbol makeJoinCondition(Function rewriteCandidate, QueriedRelation rel, QueriedRelation subRel) {
+        assert getSubquery(rewriteCandidate.arguments().get(1)).relation() == subRel : "subRel argument must match selectSymbol relation";
+
+        rewriteCandidate = RefReplacer.replaceRefs(
+            rewriteCandidate,
+            r -> rel.getField(r.ident().columnIdent(), Operation.READ));
         String name = rewriteCandidate.info().ident().name();
         assert name.startsWith(AnyOperator.OPERATOR_PREFIX) : "Can only create a join condition from any_";
 
@@ -185,23 +188,9 @@ public class SemiJoins {
             Operator.PREFIX + name.substring(AnyOperator.OPERATOR_PREFIX.length()), newArgTypes);
         return new Function(
             new FunctionInfo(joinCondIdent, DataTypes.BOOLEAN),
-            Arrays.asList(firstArg, castIfNeededOrFail(subQuery.fields().get(0), firstArg.valueType()))
+            Arrays.asList(firstArg, castIfNeededOrFail(subRel.fields().get(0), firstArg.valueType()))
         );
     }
-
-    private static boolean isSuitableSubqueryForSemiJoin(QueriedRelation relation) {
-        return true;
-
-        // QuerySpec querySpec = relation.querySpec();
-        // // Would also be unsuitable if it's a union, but we don't support UNION yet.
-        // return !querySpec.hasAggregates()
-        //     && !querySpec.groupBy().isPresent()
-        //     && !querySpec.having().isPresent()
-        //     && !querySpec.orderBy().isPresent()
-        //     && !querySpec.limit().isPresent()
-        //     && !querySpec.offset().isPresent();
-    }
-
 
     private static class RewriteCandidateGatherer extends SymbolVisitor<List<Function>, Boolean> {
 
@@ -245,9 +234,7 @@ public class SemiJoins {
             if (subQuery == null) {
                 return;
             }
-            if (subQuery.getResultType() == SelectSymbol.ResultType.SINGLE_COLUMN_MULTIPLE_VALUES
-                && isSuitableSubqueryForSemiJoin(subQuery.relation())) {
-
+            if (subQuery.getResultType() == SelectSymbol.ResultType.SINGLE_COLUMN_MULTIPLE_VALUES) {
                 candidates.add(func);
             }
         }

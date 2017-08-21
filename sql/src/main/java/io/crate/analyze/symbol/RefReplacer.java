@@ -38,6 +38,11 @@ public final class RefReplacer extends ReplacingSymbolVisitor<Function<? super R
         super(ReplaceMode.COPY);
     }
 
+    public static io.crate.analyze.symbol.Function replaceRefs(io.crate.analyze.symbol.Function func,
+                                                               Function<? super Reference, ? extends Symbol> replaceFunc) {
+        return (io.crate.analyze.symbol.Function) REPLACER.process(func, replaceFunc);
+    }
+
     public static Symbol replaceRefs(Symbol tree, Function<? super Reference, ? extends Symbol> replaceFunc) {
         return REPLACER.process(tree, replaceFunc);
     }
