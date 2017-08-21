@@ -22,8 +22,9 @@
 
 package io.crate.planner.consumer;
 
+import com.google.common.collect.ImmutableMap;
+import io.crate.analyze.MultiSourceSelect;
 import io.crate.analyze.QuerySpec;
-import io.crate.analyze.TwoTableJoin;
 import io.crate.analyze.WhereClause;
 import io.crate.analyze.relations.JoinPair;
 import io.crate.analyze.relations.QueriedRelation;
@@ -42,14 +43,15 @@ import io.crate.operation.operator.OrOperator;
 import io.crate.operation.operator.any.AnyOperator;
 import io.crate.operation.predicate.NotPredicate;
 import io.crate.planner.node.dql.join.JoinType;
+import io.crate.sql.tree.QualifiedName;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 import static io.crate.analyze.expressions.ExpressionAnalyzer.castIfNeededOrFail;
 import static io.crate.operation.operator.Operators.LOGICAL_OPERATORS;
@@ -114,19 +116,26 @@ public class SemiJoins {
              */
             return null;
         }
-        TwoTableJoin twoTableJoin = new TwoTableJoin(
+
+        // Avoid name clashes if the subquery is on the same relation; e.g.: select * from t1 where x in (select * from t1)
+        QualifiedName subQueryName = selectSymbol.relation().getQualifiedName().withPrefix("S");
+
+        // Using MSS instead of TwoTableJoin so that the "fetch-pushdown" logic in the Planner is also applied
+        return new MultiSourceSelect(
+            ImmutableMap.of(
+                rel.getQualifiedName(), rel,
+                subQueryName, selectSymbol.relation()
+            ),
+            rel.fields(),
             newQS,
-            rel,
-            selectSymbol.relation(),
-            Optional.empty(),
-            JoinPair.of(
-                rel.getQualifiedName(),
-                selectSymbol.relation().getQualifiedName(),
-                JoinType.SEMI,
-                joinCondition
-            )
+            new ArrayList<>(Collections.singletonList(
+                JoinPair.of(
+                    rel.getQualifiedName(),
+                    subQueryName,
+                    JoinType.SEMI,
+                    joinCondition
+                )))
         );
-        return twoTableJoin;
     }
 
     private static void removeRewriteCandidatesFromWhere(QueriedRelation rel, Function rewriteCandidate) {
