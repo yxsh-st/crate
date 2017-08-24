@@ -23,12 +23,14 @@
 package io.crate.planner.consumer;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import io.crate.analyze.MultiSourceSelect;
+import io.crate.analyze.QueriedTableRelation;
 import io.crate.analyze.QuerySpec;
 import io.crate.analyze.WhereClause;
+import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.JoinPair;
 import io.crate.analyze.relations.QueriedRelation;
+import io.crate.analyze.relations.RelationNormalizer;
 import io.crate.analyze.symbol.FuncSymbols;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Literal;
@@ -38,8 +40,11 @@ import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.symbol.SymbolVisitor;
 import io.crate.metadata.FunctionIdent;
 import io.crate.metadata.FunctionInfo;
+import io.crate.metadata.Functions;
+import io.crate.metadata.TransactionContext;
 import io.crate.metadata.table.Operation;
 import io.crate.operation.operator.OrOperator;
+import io.crate.operation.operator.any.AnyNeqOperator;
 import io.crate.operation.operator.any.AnyOperator;
 import io.crate.operation.predicate.NotPredicate;
 import io.crate.planner.node.dql.join.JoinType;
@@ -50,13 +55,14 @@ import io.crate.types.DataTypes;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 
 import static io.crate.analyze.expressions.ExpressionAnalyzer.castIfNeededOrFail;
 import static io.crate.operation.operator.Operators.LOGICAL_OPERATORS;
 import static io.crate.operation.scalar.cast.CastFunctionResolver.isCastFunction;
 
-public class SemiJoins {
+final class SemiJoins {
 
     /**
      * Try to rewrite a QueriedRelation into a SemiJoin:
@@ -77,7 +83,7 @@ public class SemiJoins {
      * @return the rewritten relation or null if a rewrite wasn't possible.
      */
     @Nullable
-    public static QueriedRelation tryRewrite(QueriedRelation rel) {
+    static QueriedRelation tryRewrite(QueriedRelation rel, Functions functions, TransactionContext transactionCtx) {
         WhereClause where = rel.querySpec().where();
         if (!where.hasQuery()) {
             return null;
@@ -93,24 +99,16 @@ public class SemiJoins {
         SelectSymbol selectSymbol = getSubqueryOrNull(rewriteCandidate.arguments().get(1));
         assert selectSymbol != null : "rewriteCandidate must contain a selectSymbol";
 
-        // Turn Ref(x) back into Field(rel, x); it's required to for TwoTableJoin structure;
-        // (QuerySplitting logic that follows in the Planner is based on Fields)
-        java.util.function.Function<Symbol, Symbol> refsToFields = st -> RefReplacer.replaceRefs(st,
-            r -> rel.getField(r.ident().columnIdent(), Operation.READ));
-        Symbol joinCondition;
-
-        try {
-            joinCondition = makeJoinCondition(rewriteCandidate, rel, selectSymbol.relation());
-        } catch (Exception e) {
-            /* TODO: Remove this limitation
-
-             * rel.getField(..) doesn't work in a query like this:
-             *      select count(*) from t2 where t2.id in (select id from t1)
-             * Because t2.id is not in the outputs of (select count(*) from t2)
-             * This causes replaceRefs here to fail.
-             */
+        AnalyzedRelation sourceRel = getSource(rel);
+        if (sourceRel == null) {
             return null;
         }
+
+        // Turn Ref(x) back into Field(rel, x); it's required to for TwoTableJoin structure;
+        // (QuerySplitting logic that follows in the Planner is based on Fields)
+        java.util.function.Function<? super Symbol, ? extends Symbol> refsToFields =
+            RefReplacer.replaceRefs(r -> sourceRel.getField(r.ident().columnIdent(), Operation.READ));
+        Symbol joinCondition = makeJoinCondition(rewriteCandidate, sourceRel, selectSymbol.relation());
 
         removeRewriteCandidatesFromWhere(rel, rewriteCandidate);
         QuerySpec newQS = rel.querySpec().copyAndReplace(refsToFields);
@@ -119,11 +117,15 @@ public class SemiJoins {
         QualifiedName subQueryName = selectSymbol.relation().getQualifiedName().withPrefix("S");
 
         // Using MSS instead of TwoTableJoin so that the "fetch-pushdown" logic in the Planner is also applied
-        return new MultiSourceSelect(
-            ImmutableMap.of(
-                rel.getQualifiedName(), rel,
-                subQueryName, selectSymbol.relation()
-            ),
+        RelationNormalizer relationNormalizer = new RelationNormalizer(functions);
+        HashMap<QualifiedName, AnalyzedRelation> sources = new HashMap<>(2);
+        sources.put(rel.getQualifiedName(), sourceRel);
+        sources.put(subQueryName, selectSymbol.relation());
+
+        // normalize is done to rewrite  SELECT * from t1, t2 to SELECT * from (select ... t1) t1, (select ... t2) t2
+        // because planner logic expects QueriedRelation in the sources
+        return (QueriedRelation) relationNormalizer.normalize(new MultiSourceSelect(
+            sources,
             rel.fields(),
             newQS,
             new ArrayList<>(Collections.singletonList(
@@ -133,11 +135,20 @@ public class SemiJoins {
                     JoinType.SEMI,
                     joinCondition
                 )))
-        );
+        ), transactionCtx);
+    }
+
+    @Nullable
+    private static AnalyzedRelation getSource(QueriedRelation rel) {
+        if (rel instanceof QueriedTableRelation) {
+            return ((QueriedTableRelation) rel).tableRelation();
+        }
+        // TODO: support other cases as well
+        return null;
     }
 
     private static void removeRewriteCandidatesFromWhere(QueriedRelation rel, Function rewriteCandidate) {
-        rel.querySpec().where().replace(st -> FuncSymbols.mapNodes(st, f -> {
+        rel.querySpec().where().replace(FuncSymbols.mapNodes(f -> {
             if (f == rewriteCandidate) {
                 return Literal.BOOLEAN_TRUE;
             }
@@ -145,7 +156,6 @@ public class SemiJoins {
         }));
     }
 
-    // TODO: could consider using a custom class structure instead of Function ?
     static List<Function> gatherRewriteCandidates(Symbol query) {
         ArrayList<Function> candidates = new ArrayList<>();
         RewriteCandidateGatherer.INSTANCE.process(query, candidates);
@@ -171,12 +181,13 @@ public class SemiJoins {
     /**
      * t1.x IN (select y from t2)  --> SEMI JOIN t1 on t1.x = t2.y
      */
-    static Symbol makeJoinCondition(Function rewriteCandidate, QueriedRelation rel, QueriedRelation subRel) {
-        assert getSubqueryOrNull(rewriteCandidate.arguments().get(1)).relation() == subRel : "subRel argument must match selectSymbol relation";
+    static Symbol makeJoinCondition(Function rewriteCandidate, AnalyzedRelation sourceRel, QueriedRelation subRel) {
+        assert getSubqueryOrNull(rewriteCandidate.arguments().get(1)).relation() == subRel
+            : "subRel argument must match selectSymbol relation";
 
         rewriteCandidate = RefReplacer.replaceRefs(
             rewriteCandidate,
-            r -> rel.getField(r.ident().columnIdent(), Operation.READ));
+            r -> sourceRel.getField(r.ident().columnIdent(), Operation.READ));
         String name = rewriteCandidate.info().ident().name();
         assert name.startsWith(AnyOperator.OPERATOR_PREFIX) : "Can only create a join condition from any_";
 
@@ -207,7 +218,7 @@ public class SemiJoins {
             /* Cannot rewrite a `op ANY subquery` expression into a semi-join if it's beneath a OR because
              * `op ANY subquery` has different semantics in case of NULL values than a semi-join would have
              */
-            if (funcName.equals(OrOperator.NAME) || funcName.equals(NotPredicate.NAME)) {
+            if (funcName.equals(OrOperator.NAME) || funcName.equals(NotPredicate.NAME) || funcName.equals(AnyNeqOperator.NAME)) {
                 candidates.clear();
                 return false;
             }

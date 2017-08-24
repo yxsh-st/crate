@@ -56,24 +56,18 @@ class SemiJoinBatchIterator extends NestedLoopBatchIterator {
             if (activeIt == left) {
                 return moveLeftSide();
             }
-
             Boolean x = tryAdvanceRight();
             if (x != null) {
                 return x;
             }
             activeIt = left;
+            right.moveToStart();
         }
     }
 
     @Override
     public CompletionStage<?> loadNextBatch() {
         return super.loadNextBatch();
-    }
-
-    // We only need the data from the left iterator
-    @Override
-    public Columns rowData() {
-        return left.rowData();
     }
 
     private boolean moveLeftSide() {
@@ -98,7 +92,6 @@ class SemiJoinBatchIterator extends NestedLoopBatchIterator {
     private Boolean tryAdvanceRight() {
         while (right.moveNext()) {
             if (joinCondition.getAsBoolean()) {
-                right.moveToStart();
                 activeIt = left;
                 return true;
             }
@@ -106,7 +99,6 @@ class SemiJoinBatchIterator extends NestedLoopBatchIterator {
         if (right.allLoaded() == false) {
             return false;
         }
-        right.moveToStart();
         activeIt = left;
         return null;
     }

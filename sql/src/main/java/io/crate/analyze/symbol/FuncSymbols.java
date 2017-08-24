@@ -24,6 +24,14 @@ package io.crate.analyze.symbol;
 
 public final class FuncSymbols {
 
+
+    /**
+     * @return a function that applies the mapper to all "nodes" (=functions) in a symbol
+     */
+    public static java.util.function.Function<? super Symbol, ? extends Symbol> mapNodes(java.util.function.Function<? super Function, ? extends Symbol> mapper) {
+        return st -> mapNodes(st, mapper);
+    }
+
     /**
      * Apply the mapper function on all nodes in a symbolTree.
      */

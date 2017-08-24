@@ -49,7 +49,7 @@ public class ConsumingPlanner {
     public ConsumingPlanner(ClusterService clusterService,
                             Functions functions,
                             TableStats tableStats) {
-        optimizer = new OptimizingRewriter();
+        optimizer = new OptimizingRewriter(functions);
         ProjectionBuilder projectionBuilder = new ProjectionBuilder(functions);
         consumers.add(new NonDistributedGroupByConsumer(projectionBuilder));
         consumers.add(new ReduceOnCollectorGroupByConsumer(projectionBuilder));
@@ -72,7 +72,7 @@ public class ConsumingPlanner {
 
     @Nullable
     public Plan plan(AnalyzedRelation relation, ConsumerContext consumerContext) {
-        relation = optimizer.optimize(relation);
+        relation = optimizer.optimize(relation,  consumerContext.plannerContext().transactionContext());
 
         Map<Plan, SelectSymbol> subQueries = getSubQueries(relation, consumerContext);
         for (Consumer consumer : consumers) {

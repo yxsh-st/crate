@@ -27,19 +27,33 @@ import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.AnalyzedRelationVisitor;
 import io.crate.analyze.relations.QueriedDocTable;
 import io.crate.analyze.relations.QueriedRelation;
+import io.crate.metadata.Functions;
+import io.crate.metadata.TransactionContext;
 
-class OptimizingRewriter {
+final class OptimizingRewriter {
 
-    private static final Visitor VISITOR = new Visitor();
+    private final Functions functions;
+
+    OptimizingRewriter(Functions functions) {
+        this.functions = functions;
+    }
 
     /*
-     * Return the relation as is or a re-written relation
-     */
-    public AnalyzedRelation optimize(AnalyzedRelation relation) {
-        return VISITOR.process(relation, null);
+         * Return the relation as is or a re-written relation
+         */
+    public AnalyzedRelation optimize(AnalyzedRelation relation, TransactionContext transactionContext) {
+        return new Visitor(functions, transactionContext).process(relation, null);
     }
 
     private static class Visitor extends AnalyzedRelationVisitor<Void, AnalyzedRelation> {
+
+        private final Functions functions;
+        private final TransactionContext transactionContext;
+
+        public Visitor(Functions functions, TransactionContext transactionContext) {
+            this.functions = functions;
+            this.transactionContext = transactionContext;
+        }
 
         @Override
         protected AnalyzedRelation visitAnalyzedRelation(AnalyzedRelation relation, Void context) {
@@ -53,7 +67,7 @@ class OptimizingRewriter {
 
         @Override
         public AnalyzedRelation visitQueriedDocTable(QueriedDocTable table, Void context) {
-            QueriedRelation rewrite = SemiJoins.tryRewrite(table);
+            QueriedRelation rewrite = SemiJoins.tryRewrite(table, functions, transactionContext);
             if (rewrite != null) {
                 return rewrite;
             }
