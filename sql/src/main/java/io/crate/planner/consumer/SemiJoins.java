@@ -22,6 +22,7 @@
 
 package io.crate.planner.consumer;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.crate.analyze.MultiSourceSelect;
 import io.crate.analyze.QuerySpec;
@@ -38,7 +39,6 @@ import io.crate.analyze.symbol.SymbolVisitor;
 import io.crate.metadata.FunctionIdent;
 import io.crate.metadata.FunctionInfo;
 import io.crate.metadata.table.Operation;
-import io.crate.operation.operator.Operator;
 import io.crate.operation.operator.OrOperator;
 import io.crate.operation.operator.any.AnyOperator;
 import io.crate.operation.predicate.NotPredicate;
@@ -49,12 +49,12 @@ import io.crate.types.DataTypes;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 import static io.crate.analyze.expressions.ExpressionAnalyzer.castIfNeededOrFail;
 import static io.crate.operation.operator.Operators.LOGICAL_OPERATORS;
+import static io.crate.operation.scalar.cast.CastFunctionResolver.isCastFunction;
 
 public class SemiJoins {
 
@@ -93,13 +93,10 @@ public class SemiJoins {
         SelectSymbol selectSymbol = getSubqueryOrNull(rewriteCandidate.arguments().get(1));
         assert selectSymbol != null : "rewriteCandidate must contain a selectSymbol";
 
-        removeRewriteCandidatesFromWhere(rel, rewriteCandidate);
-
         // Turn Ref(x) back into Field(rel, x); it's required to for TwoTableJoin structure;
         // (QuerySplitting logic that follows in the Planner is based on Fields)
         java.util.function.Function<Symbol, Symbol> refsToFields = st -> RefReplacer.replaceRefs(st,
             r -> rel.getField(r.ident().columnIdent(), Operation.READ));
-        QuerySpec newQS = rel.querySpec().copyAndReplace(refsToFields);
         Symbol joinCondition;
 
         try {
@@ -114,6 +111,9 @@ public class SemiJoins {
              */
             return null;
         }
+
+        removeRewriteCandidatesFromWhere(rel, rewriteCandidate);
+        QuerySpec newQS = rel.querySpec().copyAndReplace(refsToFields);
 
         // Avoid name clashes if the subquery is on the same relation; e.g.: select * from t1 where x in (select * from t1)
         QualifiedName subQueryName = selectSymbol.relation().getQualifiedName().withPrefix("S");
@@ -162,7 +162,7 @@ public class SemiJoins {
     }
 
     private static Symbol unwrapCast(Symbol symbol) {
-        while (symbol instanceof Function && ((Function) symbol).info().ident().name().startsWith("to_")) {
+        while (isCastFunction(symbol)) {
             symbol = ((Function) symbol).arguments().get(0);
         }
         return symbol;
@@ -182,13 +182,12 @@ public class SemiJoins {
 
         List<Symbol> args = rewriteCandidate.arguments();
         Symbol firstArg = args.get(0);
-        List<DataType> newArgTypes = Arrays.asList(firstArg.valueType(), firstArg.valueType());
+        List<DataType> newArgTypes = ImmutableList.of(firstArg.valueType(), firstArg.valueType());
 
-        FunctionIdent joinCondIdent = new FunctionIdent(
-            Operator.PREFIX + name.substring(AnyOperator.OPERATOR_PREFIX.length()), newArgTypes);
+        FunctionIdent joinCondIdent = new FunctionIdent(AnyOperator.nameToNonAny(name), newArgTypes);
         return new Function(
             new FunctionInfo(joinCondIdent, DataTypes.BOOLEAN),
-            Arrays.asList(firstArg, castIfNeededOrFail(subRel.fields().get(0), firstArg.valueType()))
+            ImmutableList.of(firstArg, castIfNeededOrFail(subRel.fields().get(0), firstArg.valueType()))
         );
     }
 
