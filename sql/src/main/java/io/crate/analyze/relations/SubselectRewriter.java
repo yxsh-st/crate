@@ -60,20 +60,28 @@ public final class SubselectRewriter {
         return INSTANCE.process(relation, null);
     }
 
-    private final static class Visitor extends AnalyzedRelationVisitor<QueriedSelectRelation, AnalyzedRelation> {
+    private static class Context {
+        QueriedSelectRelation parent;
+
+        public Context(QueriedSelectRelation parent) {
+            this.parent = parent;
+        }
+    }
+
+    private final static class Visitor extends AnalyzedRelationVisitor<Context, AnalyzedRelation> {
 
         @Override
-        protected AnalyzedRelation visitAnalyzedRelation(AnalyzedRelation relation, QueriedSelectRelation parent) {
+        protected AnalyzedRelation visitAnalyzedRelation(AnalyzedRelation relation, Context ctx) {
             return relation;
         }
 
         @Override
-        public AnalyzedRelation visitQueriedSelectRelation(QueriedSelectRelation relation, QueriedSelectRelation parent) {
+        public AnalyzedRelation visitQueriedSelectRelation(QueriedSelectRelation relation, Context ctx) {
             boolean mergedWithParent = false;
             QuerySpec currentQS = relation.querySpec();
-            if (parent != null) {
-                FieldReplacer fieldReplacer = new FieldReplacer(currentQS.outputs(), parent);
-                QuerySpec parentQS = parent.querySpec().copyAndReplace(fieldReplacer);
+            if (ctx != null) {
+                FieldReplacer fieldReplacer = new FieldReplacer(currentQS.outputs(), ctx.parent);
+                QuerySpec parentQS = ctx.parent.querySpec().copyAndReplace(fieldReplacer);
                 if (canBeMerged(currentQS, parentQS)) {
                     QuerySpec currentWithParentMerged = mergeQuerySpec(currentQS, parentQS);
                     relation = new QueriedSelectRelation(
@@ -85,15 +93,18 @@ public final class SubselectRewriter {
                 }
             }
             AnalyzedRelation origSubRelation = relation.subRelation();
-            QueriedRelation subRelation = (QueriedRelation) process(origSubRelation, relation);
+            QueriedRelation subRelation = (QueriedRelation) process(origSubRelation, new Context(relation));
 
             if (origSubRelation == subRelation) {
                 return relation;
             }
-            if (!mergedWithParent && parent != null) {
-                parent.subRelation(subRelation);
-                FieldReplacer fieldReplacer = new FieldReplacer(subRelation.fields(), parent);
-                parent.querySpec().replace(fieldReplacer);
+            if (!mergedWithParent && ctx != null) {
+                FieldReplacer fieldReplacer = new FieldReplacer(subRelation.fields(), ctx.parent);
+                ctx.parent = new QueriedSelectRelation(
+                    subRelation,
+                    subRelation.fields(),
+                    subRelation.querySpec().copyAndReplace(fieldReplacer)
+                );
             }
             if (relation.subRelation() != origSubRelation) {
                 return relation;
@@ -103,13 +114,13 @@ public final class SubselectRewriter {
         }
 
         @Override
-        public AnalyzedRelation visitQueriedTable(QueriedTable table, QueriedSelectRelation parent) {
-            if (parent == null) {
+        public AnalyzedRelation visitQueriedTable(QueriedTable table, Context ctx) {
+            if (ctx == null) {
                 return table;
             }
             QuerySpec currentQS = table.querySpec();
-            FieldReplacer fieldReplacer = new FieldReplacer(currentQS.outputs(), parent);
-            QuerySpec parentQS = parent.querySpec().copyAndReplace(fieldReplacer);
+            FieldReplacer fieldReplacer = new FieldReplacer(currentQS.outputs(), ctx.parent);
+            QuerySpec parentQS = ctx.parent.querySpec().copyAndReplace(fieldReplacer);
             if (canBeMerged(currentQS, parentQS)) {
                 QuerySpec currentWithParentMerged = mergeQuerySpec(currentQS, parentQS);
                 return new QueriedTable(
@@ -122,13 +133,13 @@ public final class SubselectRewriter {
         }
 
         @Override
-        public AnalyzedRelation visitQueriedDocTable(QueriedDocTable table, QueriedSelectRelation parent) {
-            if (parent == null) {
+        public AnalyzedRelation visitQueriedDocTable(QueriedDocTable table, Context ctx) {
+            if (ctx == null) {
                 return table;
             }
             QuerySpec currentQS = table.querySpec();
-            FieldReplacer fieldReplacer = new FieldReplacer(currentQS.outputs(), parent);
-            QuerySpec parentQS = parent.querySpec().copyAndReplace(fieldReplacer);
+            FieldReplacer fieldReplacer = new FieldReplacer(currentQS.outputs(), ctx.parent);
+            QuerySpec parentQS = ctx.parent.querySpec().copyAndReplace(fieldReplacer);
             if (canBeMerged(currentQS, parentQS)) {
                 QuerySpec currentWithParentMerged = mergeQuerySpec(currentQS, parentQS);
                 return new QueriedDocTable(
@@ -141,13 +152,13 @@ public final class SubselectRewriter {
         }
 
         @Override
-        public AnalyzedRelation visitMultiSourceSelect(MultiSourceSelect multiSourceSelect, QueriedSelectRelation parent) {
-            if (parent == null) {
+        public AnalyzedRelation visitMultiSourceSelect(MultiSourceSelect multiSourceSelect, Context ctx) {
+            if (ctx == null) {
                 return multiSourceSelect;
             }
             QuerySpec currentQS = multiSourceSelect.querySpec();
-            FieldReplacer fieldReplacer = new FieldReplacer(currentQS.outputs(), parent);
-            QuerySpec parentQS = parent.querySpec().copyAndReplace(fieldReplacer);
+            FieldReplacer fieldReplacer = new FieldReplacer(currentQS.outputs(), ctx.parent);
+            QuerySpec parentQS = ctx.parent.querySpec().copyAndReplace(fieldReplacer);
             if (canBeMerged(currentQS, parentQS)) {
                 QuerySpec currentWithParentMerged = mergeQuerySpec(currentQS, parentQS);
                 return new MultiSourceSelect(

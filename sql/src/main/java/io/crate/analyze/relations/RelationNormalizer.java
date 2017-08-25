@@ -29,9 +29,12 @@ import io.crate.analyze.QueriedTable;
 import io.crate.analyze.QuerySpec;
 import io.crate.analyze.Rewriter;
 import io.crate.analyze.symbol.FieldReplacer;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.metadata.Functions;
 import io.crate.metadata.TransactionContext;
 import io.crate.metadata.table.Operation;
+
+import java.util.function.Function;
 
 /**
  * The RelationNormalizer tries to merge the tree of relations in a QueriedSelectRelation into a single QueriedRelation.
@@ -69,14 +72,17 @@ public final class RelationNormalizer {
         public AnalyzedRelation visitQueriedSelectRelation(QueriedSelectRelation relation, TransactionContext context) {
             QueriedRelation subRelation = relation.subRelation();
             QueriedRelation normalizedSubRelation = (QueriedRelation) process(relation.subRelation(), context);
-            relation.subRelation(normalizedSubRelation);
             if (subRelation != normalizedSubRelation) {
-                relation.querySpec().replace(FieldReplacer.bind(f -> {
+                Function<? super Symbol, ? extends Symbol> resolveFields = FieldReplacer.bind(f -> {
                     if (f.relation().equals(subRelation)) {
                         return normalizedSubRelation.getField(f.path(), Operation.READ);
                     }
                     return f;
-                }));
+                });
+                return new QueriedSelectRelation(
+                    normalizedSubRelation,
+                    relation.fields(),
+                    relation.querySpec().copyAndReplace(resolveFields));
             }
             return relation;
         }
