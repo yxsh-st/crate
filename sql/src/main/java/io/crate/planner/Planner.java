@@ -50,6 +50,7 @@ import io.crate.analyze.ShowCreateTableAnalyzedStatement;
 import io.crate.analyze.UpdateAnalyzedStatement;
 import io.crate.analyze.WhereClause;
 import io.crate.analyze.relations.AnalyzedRelation;
+import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.symbol.Literal;
 import io.crate.analyze.symbol.SelectSymbol;
 import io.crate.analyze.symbol.Symbol;
@@ -194,10 +195,8 @@ public class Planner extends AnalyzedStatementVisitor<Planner.Context, Plan> {
                 planner, clusterService, subJobId, consumingPlanner, normalizer, transactionContext, softLimit, fetchSize));
         }
 
-        void applySoftLimit(QuerySpec querySpec) {
-            if (softLimit != 0 && !querySpec.limit().isPresent()) {
-                querySpec.limit(Optional.of(Literal.of((long) softLimit)));
-            }
+        void applySoftLimit(QueriedRelation rel) {
+            throw new UnsupportedOperationException("TODO");
         }
 
         public String handlerNode() {

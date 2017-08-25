@@ -22,7 +22,6 @@
 
 package io.crate.planner;
 
-import io.crate.analyze.QuerySpec;
 import io.crate.analyze.SelectAnalyzedStatement;
 import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.QueriedRelation;
@@ -52,8 +51,8 @@ public class SubqueryPlanner {
         subQueries.put(subPlan, selectSymbol);
     }
 
-    public Map<Plan, SelectSymbol> planSubQueries(QuerySpec querySpec) {
-        querySpec.visitSymbols(visitor);
+    public Map<Plan, SelectSymbol> planSubQueries(QueriedRelation rel) {
+        rel.visitSymbols(visitor);
         return subQueries;
     }
 

@@ -21,9 +21,24 @@
 
 package io.crate.analyze.relations;
 
-import io.crate.analyze.QuerySpec;
+import io.crate.analyze.HavingClause;
+import io.crate.analyze.OrderBy;
+import io.crate.analyze.WhereClause;
+import io.crate.analyze.symbol.Symbol;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.function.Consumer;
 
 public interface QueriedRelation extends AnalyzedRelation {
 
-    QuerySpec querySpec();
+    List<Symbol> outputs();
+    WhereClause where();
+    Optional<List<Symbol>> groupBy();
+    Optional<HavingClause> having();
+    Optional<OrderBy> orderBy();
+    Optional<Symbol> limit();
+    Optional<Symbol> offset();
+
+    void visitSymbols(Consumer<? super Symbol> consumer);
 }

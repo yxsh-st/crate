@@ -22,6 +22,7 @@
 
 package io.crate.analyze;
 
+import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.AnalyzedRelationVisitor;
 import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.symbol.Field;
@@ -36,15 +37,17 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 
 public class QueriedSelectRelation implements QueriedRelation {
 
     private final Fields fields;
     private final QuerySpec querySpec;
 
-    private QueriedRelation subRelation;
+    private AnalyzedRelation subRelation;
 
-    public QueriedSelectRelation(QueriedRelation subRelation, Collection<? extends Path> outputNames, QuerySpec querySpec) {
+    public QueriedSelectRelation(AnalyzedRelation subRelation,
+                                 Collection<? extends Path> outputNames) {
         this.subRelation = subRelation;
         this.querySpec = querySpec;
         this.fields = new Fields(outputNames.size());
@@ -60,11 +63,6 @@ public class QueriedSelectRelation implements QueriedRelation {
 
     public void subRelation(QueriedRelation subRelation) {
         this.subRelation = subRelation;
-    }
-
-    @Override
-    public QuerySpec querySpec() {
-        return querySpec;
     }
 
     @Override
@@ -94,5 +92,40 @@ public class QueriedSelectRelation implements QueriedRelation {
     @Override
     public void setQualifiedName(@Nonnull QualifiedName qualifiedName) {
         subRelation.setQualifiedName(qualifiedName);
+    }
+
+    @Override
+    public List<Symbol> outputs() {
+        return querySpec.outputs();
+    }
+
+    @Override
+    public WhereClause where() {
+        return querySpec.where();
+    }
+
+    @Override
+    public Optional<List<Symbol>> groupBy() {
+        return querySpec.groupBy();
+    }
+
+    @Override
+    public Optional<HavingClause> having() {
+        return querySpec.having();
+    }
+
+    @Override
+    public Optional<OrderBy> orderBy() {
+        return querySpec.orderBy();
+    }
+
+    @Override
+    public Optional<Symbol> limit() {
+        return querySpec.limit();
+    }
+
+    @Override
+    public Optional<Symbol> offset() {
+        return querySpec.offset();
     }
 }
