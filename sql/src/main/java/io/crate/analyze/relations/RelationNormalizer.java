@@ -25,7 +25,7 @@ package io.crate.analyze.relations;
 import io.crate.analyze.EvaluatingNormalizer;
 import io.crate.analyze.MultiSourceSelect;
 import io.crate.analyze.QueriedSelectRelation;
-import io.crate.analyze.QueriedTable;
+import io.crate.analyze.QueriedTableRelation;
 import io.crate.analyze.QuerySpec;
 import io.crate.analyze.Rewriter;
 import io.crate.analyze.symbol.FieldReplacer;
@@ -82,16 +82,9 @@ public final class RelationNormalizer {
         }
 
         @Override
-        public AnalyzedRelation visitQueriedTable(QueriedTable table, TransactionContext context) {
-            table.normalize(functions, context);
-            return table;
-        }
-
-        @Override
-        public AnalyzedRelation visitQueriedDocTable(QueriedDocTable table, TransactionContext context) {
-            table.normalize(functions, context);
-            table.analyzeWhereClause(functions, context);
-            return table;
+        public <TR extends AbstractTableRelation> AnalyzedRelation visitQueriedTableRelation(QueriedTableRelation<TR> rel, TransactionContext context) {
+            rel.normalize(functions, context);
+            return rel;
         }
 
         @Override

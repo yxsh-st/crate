@@ -21,7 +21,11 @@
 
 package io.crate.analyze.relations;
 
-import io.crate.analyze.*;
+import io.crate.analyze.ExplainAnalyzedStatement;
+import io.crate.analyze.MultiSourceSelect;
+import io.crate.analyze.QueriedSelectRelation;
+import io.crate.analyze.QueriedTableRelation;
+import io.crate.analyze.TwoTableJoin;
 
 import javax.annotation.Nullable;
 import java.util.Locale;
@@ -34,14 +38,6 @@ public abstract class AnalyzedRelationVisitor<C, R> {
 
     protected R visitAnalyzedRelation(AnalyzedRelation relation, C context) {
         throw new UnsupportedOperationException(String.format(Locale.ENGLISH, "relation \"%s\" is not supported", relation));
-    }
-
-    public R visitQueriedTable(QueriedTable table, C context) {
-        return visitAnalyzedRelation(table, context);
-    }
-
-    public R visitQueriedDocTable(QueriedDocTable table, C context) {
-        return visitAnalyzedRelation(table, context);
     }
 
     public R visitMultiSourceSelect(MultiSourceSelect multiSourceSelect, C context) {
@@ -70,5 +66,9 @@ public abstract class AnalyzedRelationVisitor<C, R> {
 
     public R visitQueriedSelectRelation(QueriedSelectRelation relation, C context) {
         return visitAnalyzedRelation(relation, context);
+    }
+
+    public <TR extends AbstractTableRelation> R visitQueriedTableRelation(QueriedTableRelation<TR> rel, C context) {
+        return visitAnalyzedRelation(rel, context);
     }
 }

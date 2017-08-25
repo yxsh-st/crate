@@ -22,6 +22,7 @@
 package io.crate.analyze;
 
 import io.crate.analyze.relations.AbstractTableRelation;
+import io.crate.analyze.relations.AnalyzedRelationVisitor;
 import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.symbol.Field;
 import io.crate.analyze.symbol.Symbol;
@@ -38,13 +39,13 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 
-public abstract class QueriedTableRelation<TR extends AbstractTableRelation> implements QueriedRelation {
+public final class QueriedTableRelation<TR extends AbstractTableRelation> implements QueriedRelation {
 
-    protected final TR tableRelation;
+    private final TR tableRelation;
     private final QuerySpec querySpec;
     private final Fields fields;
 
-    protected QueriedTableRelation(TR tableRelation, Collection<? extends Path> outputNames, QuerySpec querySpec) {
+    public QueriedTableRelation(TR tableRelation, Collection<? extends Path> outputNames, QuerySpec querySpec) {
         this.tableRelation = tableRelation;
         this.querySpec = querySpec;
         this.fields = new Fields(outputNames.size());
@@ -70,6 +71,11 @@ public abstract class QueriedTableRelation<TR extends AbstractTableRelation> imp
         EvaluatingNormalizer normalizer = new EvaluatingNormalizer(
             functions, RowGranularity.CLUSTER, null, tableRelation);
         querySpec.replace(s -> normalizer.normalize(s, transactionContext));
+    }
+
+    @Override
+    public <C, R> R accept(AnalyzedRelationVisitor<C, R> visitor, C context) {
+        return visitor.visitQueriedTableRelation(this, context);
     }
 
     @Nullable
