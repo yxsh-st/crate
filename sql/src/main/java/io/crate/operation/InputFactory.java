@@ -41,6 +41,7 @@ import io.crate.operation.reference.ReferenceResolver;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Factory which can be used to create {@link Input}s from symbols.
@@ -83,6 +84,11 @@ public class InputFactory {
             new RefVisitor<>(
                 functions,
                 new GatheringRefResolver<>(expressions::add, referenceResolver)));
+    }
+
+    public Function<? super Symbol, Object> evaluatorFor(ReferenceResolver<? extends Input<?>> refResolver) {
+        RefVisitor<? extends Input<?>> inputRefVisitor = new RefVisitor<>(functions, refResolver);
+        return s -> inputRefVisitor.process(s, null).value();
     }
 
     public Context<CollectExpression<Row, ?>> ctxForInputColumns() {

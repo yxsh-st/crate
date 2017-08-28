@@ -21,15 +21,13 @@
 
 package io.crate.operation.collect.sources;
 
-import io.crate.analyze.EvaluatingNormalizer;
+import io.crate.analyze.WhereClause;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.data.BatchConsumer;
-import io.crate.data.Row;
+import io.crate.data.RowN;
 import io.crate.metadata.ClusterReferenceResolver;
 import io.crate.metadata.Functions;
-import io.crate.metadata.RowGranularity;
 import io.crate.operation.InputFactory;
-import io.crate.operation.InputRow;
-import io.crate.operation.collect.CollectExpression;
 import io.crate.operation.collect.CrateCollector;
 import io.crate.operation.collect.JobCollectContext;
 import io.crate.operation.collect.RowsCollector;
@@ -38,30 +36,38 @@ import io.crate.planner.node.dql.RoutedCollectPhase;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.inject.Singleton;
 
+import java.util.List;
+import java.util.function.Function;
+
 @Singleton
 public class SingleRowSource implements CollectSource {
 
-    private final Functions functions;
-    private final EvaluatingNormalizer clusterNormalizer;
+    private final Function<? super Symbol, Object> evaluator;
 
     @Inject
     public SingleRowSource(Functions functions, ClusterReferenceResolver clusterRefResolver) {
-        this.functions = functions;
-        clusterNormalizer = new EvaluatingNormalizer(functions, RowGranularity.CLUSTER, clusterRefResolver, null);
+        InputFactory inputFactory = new InputFactory(functions);
+        evaluator = inputFactory.evaluatorFor(clusterRefResolver);
     }
 
     @Override
     public CrateCollector getCollector(CollectPhase phase, BatchConsumer consumer, JobCollectContext jobCollectContext) {
         RoutedCollectPhase collectPhase = (RoutedCollectPhase) phase;
-        collectPhase = collectPhase.normalize(clusterNormalizer, null);
-        if (collectPhase.whereClause().noMatch()) {
-            return RowsCollector.empty(consumer, phase.toCollect().size());
-        }
-        assert !collectPhase.whereClause().hasQuery()
-            : "WhereClause should have been normalized to either MATCH_ALL or NO_MATCH";
+        List<Symbol> toCollect = collectPhase.toCollect();
+        WhereClause whereClause = collectPhase.whereClause();
 
-        InputFactory inputFactory = new InputFactory(functions);
-        InputFactory.Context<CollectExpression<Row, ?>> ctx = inputFactory.ctxForInputColumns(collectPhase.toCollect());
-        return RowsCollector.single(new InputRow(ctx.topLevelInputs()), consumer);
+        if (whereClause.hasQuery()) {
+            Boolean match = (Boolean) evaluator.apply(whereClause.query());
+            if (match == null || !match) {
+                return RowsCollector.empty(consumer, toCollect.size());
+            }
+        } else if (whereClause.noMatch()) {
+            return RowsCollector.empty(consumer, toCollect.size());
+        }
+        Object[] cells = new Object[toCollect.size()];
+        for (int i = 0; i < toCollect.size(); i++) {
+            cells[i] = evaluator.apply(toCollect.get(i));
+        }
+        return RowsCollector.single(new RowN(cells), consumer);
     }
 }
