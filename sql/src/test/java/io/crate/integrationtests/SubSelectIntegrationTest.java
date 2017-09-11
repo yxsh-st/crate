@@ -677,4 +677,10 @@ public class SubSelectIntegrationTest extends SQLTransportIntegrationTest {
                "5\n" +
                "6\n"));
     }
+
+    @Test
+    public void testCorrelation() throws Exception {
+        execute("create table t1 (x int)");
+        execute("select (select 1 from t1 where t1.x = tparent.x) from t1 as tparent");
+    }
 }

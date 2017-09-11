@@ -29,6 +29,7 @@ import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.TableIdent;
 import io.crate.metadata.table.Operation;
 import io.crate.sql.tree.QualifiedName;
+import org.elasticsearch.common.collect.Tuple;
 
 import javax.annotation.Nullable;
 import java.util.Arrays;
@@ -48,8 +49,7 @@ public class FullQualifiedNameFieldProvider implements FieldProvider<Field> {
     private final ParentRelations parents;
     private final String defaultSchema;
 
-    public FullQualifiedNameFieldProvider(Map<QualifiedName,
-                                          AnalyzedRelation> sources,
+    public FullQualifiedNameFieldProvider(Map<QualifiedName, AnalyzedRelation> sources,
                                           ParentRelations parents,
                                           String defaultSchema) {
         assert !sources.isEmpty() : "Must have at least one source";
@@ -84,6 +84,10 @@ public class FullQualifiedNameFieldProvider implements FieldProvider<Field> {
                                                    "\"<column>\", \"<table>.<column>\" or \"<schema>.<table>.<column>\"");
         }
 
+        return getField(operation, columnSchema, columnTableName, columnIdent);
+    }
+
+    private Field getField(Operation operation, String columnSchema, String columnTableName, ColumnIdent columnIdent) {
         boolean schemaMatched = false;
         boolean tableNameMatched = false;
         Field lastField = null;
@@ -124,8 +128,14 @@ public class FullQualifiedNameFieldProvider implements FieldProvider<Field> {
         if (lastField == null) {
             if (!schemaMatched || !tableNameMatched) {
                 String schema = columnSchema == null ? defaultSchema : columnSchema;
-                raiseUnsupportedFeatureIfInParentScope(columnSchema, columnTableName, schema);
-                throw RelationUnknownException.of(schema, columnTableName);
+
+                Tuple<Map<QualifiedName, AnalyzedRelation>, ParentRelations> parentScope = parents.pop();
+                if (parentScope == null) {
+                    throw RelationUnknownException.of(schema, columnTableName);
+                }
+                FullQualifiedNameFieldProvider fieldProvider =
+                    new FullQualifiedNameFieldProvider(parentScope.v1(), parentScope.v2(), defaultSchema);
+                return fieldProvider.getField(operation, columnSchema, columnTableName, columnIdent);
             }
             QualifiedName tableName = sources.entrySet().iterator().next().getKey();
             TableIdent tableIdent = TableIdent.fromIndexName(tableName.toString());

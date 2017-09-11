@@ -23,7 +23,9 @@
 package io.crate.analyze.relations;
 
 import io.crate.sql.tree.QualifiedName;
+import org.elasticsearch.common.collect.Tuple;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -39,7 +41,7 @@ public class ParentRelations {
         sourcesTree = Collections.emptyList();
     }
 
-    private ParentRelations(ArrayList<Map<QualifiedName, AnalyzedRelation>> sourcesTree) {
+    private ParentRelations(List<Map<QualifiedName, AnalyzedRelation>> sourcesTree) {
         this.sourcesTree = sourcesTree;
     }
 
@@ -56,5 +58,18 @@ public class ParentRelations {
             }
         }
         return false;
+    }
+
+    @Nullable
+    public Tuple<Map<QualifiedName, AnalyzedRelation>, ParentRelations> pop() {
+        if (sourcesTree.isEmpty()) {
+            return null;
+        }
+        int size = sourcesTree.size();
+        Map<QualifiedName, AnalyzedRelation> parentSources = sourcesTree.get(size - 1);
+        return new Tuple<>(
+            parentSources,
+            new ParentRelations(sourcesTree.subList(0, size - 1))
+        );
     }
 }
