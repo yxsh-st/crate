@@ -37,6 +37,7 @@ import io.crate.sql.tree.QualifiedName;
 
 import javax.annotation.Nonnull;
 import java.util.List;
+import java.util.Optional;
 
 public class TwoTableJoin implements QueriedRelation {
 
@@ -91,6 +92,41 @@ public class TwoTableJoin implements QueriedRelation {
     @Override
     public QuerySpec querySpec() {
         return querySpec;
+    }
+
+    @Override
+    public List<Symbol> outputs() {
+        return querySpec.outputs();
+    }
+
+    @Override
+    public WhereClause where() {
+        return querySpec.where();
+    }
+
+    @Override
+    public Optional<List<Symbol>> groupKeys() {
+        return querySpec.groupBy();
+    }
+
+    @Override
+    public Optional<HavingClause> having() {
+        return querySpec.having();
+    }
+
+    @Override
+    public Optional<OrderBy> orderBy() {
+        return querySpec.orderBy();
+    }
+
+    @Override
+    public Optional<Symbol> limit() {
+        return querySpec.limit();
+    }
+
+    @Override
+    public Optional<Symbol> offset() {
+        return querySpec.offset();
     }
 
     public JoinPair joinPair() {

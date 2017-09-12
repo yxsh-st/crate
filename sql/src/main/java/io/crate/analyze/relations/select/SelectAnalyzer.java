@@ -25,6 +25,7 @@ import io.crate.analyze.OutputNameFormatter;
 import io.crate.analyze.expressions.ExpressionAnalysisContext;
 import io.crate.analyze.expressions.ExpressionAnalyzer;
 import io.crate.analyze.relations.AnalyzedRelation;
+import io.crate.analyze.symbol.AliasedSymbol;
 import io.crate.analyze.symbol.Field;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.validator.SelectSymbolValidator;
@@ -60,7 +61,9 @@ public class SelectAnalyzer {
         protected Void visitSingleColumn(SingleColumn node, SelectAnalysis context) {
             Symbol symbol = context.toSymbol(node.getExpression());
             if (node.getAlias().isPresent()) {
-                context.add(new OutputName(node.getAlias().get()), symbol);
+                OutputName alias = new OutputName(node.getAlias().get());
+                AliasedSymbol aliasedSymbol = new AliasedSymbol(alias, symbol);
+                context.add(alias, aliasedSymbol);
             } else {
                 context.add(new OutputName(OutputNameFormatter.format(node.getExpression())), symbol);
             }

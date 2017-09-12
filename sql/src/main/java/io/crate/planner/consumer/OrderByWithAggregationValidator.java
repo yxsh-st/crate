@@ -21,10 +21,12 @@
 
 package io.crate.planner.consumer;
 
+import io.crate.analyze.symbol.AliasedSymbol;
 import io.crate.analyze.symbol.Field;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.symbol.SymbolVisitor;
+import io.crate.analyze.symbol.Symbols;
 import io.crate.analyze.symbol.format.SymbolFormatter;
 import io.crate.metadata.FunctionInfo;
 
@@ -84,12 +86,20 @@ public class OrderByWithAggregationValidator {
 
         @Override
         public Void visitField(Field field, ValidatorContext context) {
-            if (context.outputSymbols.contains(field)) {
+            if (Symbols.containedIn(context.outputSymbols, field)) {
                 return null;
             } else {
                 String template = context.isDistinct ? INVALID_FIELD_IN_DISTINCT_TEMPLATE : INVALID_FIELD_TEMPLATE;
                 throw new UnsupportedOperationException(SymbolFormatter.format(template, field));
             }
+        }
+
+        @Override
+        public Void visitAliasedSymbol(AliasedSymbol aliasedSymbol, ValidatorContext context) {
+            if (context.outputSymbols.contains(aliasedSymbol)) {
+                return null;
+            }
+            return super.visitAliasedSymbol(aliasedSymbol, context);
         }
 
         @Override

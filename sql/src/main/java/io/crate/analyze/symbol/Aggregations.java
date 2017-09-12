@@ -133,6 +133,14 @@ public final class Aggregations {
         }
 
         @Override
+        public Boolean visitAliasedSymbol(AliasedSymbol aliasedSymbol, List<Symbol> context) {
+            if (context.contains(aliasedSymbol)) {
+                return true;
+            }
+            return super.visitAliasedSymbol(aliasedSymbol, context);
+        }
+
+        @Override
         public Boolean visitAggregation(Aggregation symbol, List<Symbol> context) {
             return true;
         }

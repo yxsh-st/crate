@@ -22,7 +22,8 @@
 
 package io.crate.rest.action;
 
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
+import io.crate.analyze.symbol.Symbols;
 import io.crate.data.Row;
 import io.crate.types.CollectionType;
 import io.crate.types.DataType;
@@ -56,18 +57,18 @@ class ResultToXContentBuilder {
         return new ResultToXContentBuilder(channel);
     }
 
-    ResultToXContentBuilder cols(List<Field> fields) throws IOException {
+    ResultToXContentBuilder cols(List<? extends Symbol> fields) throws IOException {
         builder.startArray(FIELDS.COLS);
-        for (Field field : fields) {
-            builder.value(field.path().outputName());
+        for (Symbol field : fields) {
+            builder.value(Symbols.pathFromSymbol(field).outputName());
         }
         builder.endArray();
         return this;
     }
 
-    ResultToXContentBuilder colTypes(List<Field> fields) throws IOException {
+    ResultToXContentBuilder colTypes(List<? extends Symbol> fields) throws IOException {
         builder.startArray(FIELDS.COLUMN_TYPES);
-        for (Field field : fields) {
+        for (Symbol field : fields) {
             toXContentNestedDataType(builder, field.valueType());
         }
         builder.endArray();

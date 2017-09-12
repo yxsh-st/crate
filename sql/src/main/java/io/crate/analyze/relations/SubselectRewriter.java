@@ -312,7 +312,7 @@ public final class SubselectRewriter {
              * divide(Field[x, rel=t1], Field[i, rel=t2]  -> divide(Field[x, rel=aliased_sub], Field[i, rel=aliased_sub])
              */
             for (Field field : relation.fields()) {
-                fieldByQSOutputSymbol.put(apply(relation.querySpec().outputs().get(field.index())), field);
+                fieldByQSOutputSymbol.put(apply(relation.outputs().get(field.index())), field);
             }
         }
 

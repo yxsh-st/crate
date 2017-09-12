@@ -42,6 +42,7 @@ import io.crate.analyze.symbol.Aggregations;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Literal;
 import io.crate.analyze.symbol.Symbol;
+import io.crate.analyze.symbol.Symbols;
 import io.crate.analyze.symbol.format.SymbolPrinter;
 import io.crate.analyze.validator.GroupBySymbolValidator;
 import io.crate.analyze.validator.HavingSymbolValidator;
@@ -366,7 +367,7 @@ public class RelationAnalyzer extends DefaultTraversalVisitor<AnalyzedRelation, 
                                                      List<Symbol> groupBy) throws IllegalArgumentException {
         for (int i = 0; i < outputSymbols.size(); i++) {
             Symbol output = outputSymbols.get(i);
-            if (groupBy == null || !groupBy.contains(output)) {
+            if (groupBy == null || !Symbols.containedIn(groupBy, output)) {
                 if (output.isValue()) {
                     // values are allowed even if not present in group by
                     continue;

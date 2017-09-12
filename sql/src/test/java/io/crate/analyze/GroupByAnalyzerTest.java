@@ -199,8 +199,8 @@ public class GroupByAnalyzerTest extends CrateDummyClusterServiceUnitTest {
     @Test
     public void testNegateAliasRealColumnGroupByAlias() {
         SelectAnalyzedStatement analyzedStatement = analyze("select age age, - age age from foo.users group by age;");
-        assertThat(analyzedStatement.relation().querySpec().groupBy().isPresent(), is(true));
-        List<Symbol> groupBySymbols = analyzedStatement.relation().querySpec().groupBy().get();
+        assertThat(analyzedStatement.relation().groupKeys().isPresent(), is(true));
+        List<Symbol> groupBySymbols = analyzedStatement.relation().groupKeys().get();
         ReferenceIdent groupByIdent = ((Reference) groupBySymbols.get(0)).ident();
         assertThat(groupByIdent.columnIdent().fqn(), is("age"));
         assertThat(groupByIdent.tableIdent().fqn(), is("foo.users"));
@@ -209,12 +209,12 @@ public class GroupByAnalyzerTest extends CrateDummyClusterServiceUnitTest {
     @Test
     public void testGroupBySubscript() throws Exception {
         QueriedRelation relation = analyze("select load['1'], count(*) from sys.nodes group by load['1']").relation();
-        assertThat(relation.querySpec().limit().isPresent(), is(false));
+        assertThat(relation.limit().isPresent(), is(false));
 
-        assertThat(relation.querySpec().groupBy(), notNullValue());
-        assertThat(relation.querySpec().outputs().size(), is(2));
-        assertThat(relation.querySpec().groupBy().get().size(), is(1));
-        assertThat(relation.querySpec().groupBy().get().get(0), isReference("load['1']"));
+        assertThat(relation.groupKeys(), notNullValue());
+        assertThat(relation.outputs().size(), is(2));
+        assertThat(relation.groupKeys().get().size(), is(1));
+        assertThat(relation.groupKeys().get().get(0), isReference("load['1']"));
     }
 
     @Test

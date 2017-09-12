@@ -23,6 +23,7 @@ package io.crate.analyze.relations;
 
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.Path;
 import io.crate.metadata.Reference;
@@ -221,5 +222,10 @@ public abstract class AbstractTableRelation<T extends TableInfo> implements Anal
     }
 
     public void validateOrderBy(Optional<OrderBy> orderBy) {
+    }
+
+    @Override
+    public List<? extends Symbol> outputs() {
+        return fields();
     }
 }

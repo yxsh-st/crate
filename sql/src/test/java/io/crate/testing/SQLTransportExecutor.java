@@ -28,7 +28,7 @@ import io.crate.action.sql.Option;
 import io.crate.action.sql.ResultReceiver;
 import io.crate.action.sql.SQLActionException;
 import io.crate.action.sql.SQLOperations;
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.data.Row;
 import io.crate.exceptions.SQLExceptions;
 import io.crate.metadata.Schemas;
@@ -84,6 +84,7 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import static io.crate.action.sql.SQLOperations.Session.UNNAMED;
+import static io.crate.analyze.symbol.Symbols.pathFromSymbol;
 import static org.hamcrest.Matchers.equalTo;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
@@ -191,7 +192,7 @@ public class SQLTransportExecutor {
         final AdapterActionFuture<SQLResponse, SQLResponse> actionFuture = new PlainActionFuture<>();
         executor.getSession().parse(UNNAMED, stmt, Collections.emptyList());
         executor.getSession().bind(UNNAMED, UNNAMED, Collections.emptyList(), null);
-        List<Field> outputFields = executor.getSession().describe('P', UNNAMED);
+        List<? extends Symbol> outputFields = executor.getSession().describe('P', UNNAMED);
         try {
             executor.execute(new ResultSetReceiver(actionFuture, executor.getSession().sessionContext(), outputFields), Collections.emptyList());
         } catch (Throwable t) {
@@ -234,7 +235,7 @@ public class SQLTransportExecutor {
             session.parse(UNNAMED, stmt, Collections.<DataType>emptyList());
             List<Object> argsList = args == null ? Collections.emptyList() : Arrays.asList(args);
             session.bind(UNNAMED, UNNAMED, argsList, null);
-            List<Field> outputFields = session.describe('P', UNNAMED);
+            List<? extends Symbol> outputFields = session.describe('P', UNNAMED);
             if (outputFields == null) {
                 ResultReceiver resultReceiver = new RowCountReceiver(listener, session.sessionContext());
                 session.execute(UNNAMED, 0, resultReceiver);
@@ -271,7 +272,7 @@ public class SQLTransportExecutor {
                     session.execute(UNNAMED, 0, resultReceiver);
                 }
             }
-            List<Field> outputColumns = session.describe('P', UNNAMED);
+            List<? extends Symbol> outputColumns = session.describe('P', UNNAMED);
             if (outputColumns != null) {
                 throw new UnsupportedOperationException(
                     "Bulk operations for statements that return result sets is not supported");
@@ -583,11 +584,11 @@ public class SQLTransportExecutor {
         private final List<Object[]> rows = new ArrayList<>();
         private final ActionListener<SQLResponse> listener;
         private final ExceptionAuthorizedValidator exceptionAuthorizedValidator;
-        private final List<Field> outputFields;
+        private final List<? extends Symbol> outputFields;
 
         ResultSetReceiver(ActionListener<SQLResponse> listener,
                           ExceptionAuthorizedValidator exceptionAuthorizedValidator,
-                          List<Field> outputFields) {
+                          List<? extends Symbol> outputFields) {
             this.listener = listener;
             this.exceptionAuthorizedValidator = exceptionAuthorizedValidator;
             this.outputFields = outputFields;
@@ -615,8 +616,8 @@ public class SQLTransportExecutor {
             DataType[] outputTypes = new DataType[outputFields.size()];
 
             for (int i = 0, outputFieldsSize = outputFields.size(); i < outputFieldsSize; i++) {
-                Field field = outputFields.get(i);
-                outputNames[i] = field.path().outputName();
+                Symbol field = outputFields.get(i);
+                outputNames[i] = pathFromSymbol(field).outputName();
                 outputTypes[i] = field.valueType();
             }
 

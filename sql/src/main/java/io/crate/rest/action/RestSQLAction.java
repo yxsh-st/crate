@@ -31,7 +31,7 @@ import io.crate.action.sql.SQLActionException;
 import io.crate.action.sql.SQLOperations;
 import io.crate.action.sql.parser.SQLXContentSourceContext;
 import io.crate.action.sql.parser.SQLXContentSourceParser;
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.symbol.Symbols;
 import io.crate.breaker.CrateCircuitBreakerService;
 import io.crate.breaker.RamAccountingContext;
@@ -166,7 +166,7 @@ public class RestSQLAction extends BaseRestHandler {
             session.parse(UNNAMED, context.stmt(), Collections.emptyList());
             List<Object> args = context.args() == null ? Collections.emptyList() : Arrays.asList(context.args());
             session.bind(UNNAMED, UNNAMED, args, null);
-            List<Field> outputFields = session.describe('P', UNNAMED);
+            List<? extends Symbol> outputFields = session.describe('P', UNNAMED);
             if (outputFields == null) {
                 return channel -> {
                     try {
@@ -223,7 +223,7 @@ public class RestSQLAction extends BaseRestHandler {
                     session.execute(UNNAMED, 0, resultReceiver);
                 }
             }
-            List<Field> outputColumns = session.describe('P', UNNAMED);
+            List<? extends Symbol> outputColumns = session.describe('P', UNNAMED);
             if (outputColumns != null) {
                 throw new UnsupportedOperationException(
                     "Bulk operations for statements that return result sets is not supported");

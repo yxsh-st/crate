@@ -77,6 +77,18 @@ public class Symbols {
         return HAS_COLUMN_VISITOR.process(symbol, columnIdent);
     }
 
+    public static boolean containedIn(Collection<? extends Symbol> haystack, Symbol needle) {
+        for (Symbol symbol : haystack) {
+            if (symbol.equals(needle) ||
+                needle instanceof AliasedSymbol && symbol.equals(((AliasedSymbol) needle).symbol()) ||
+                symbol instanceof AliasedSymbol && ((AliasedSymbol) symbol).symbol().equals(needle)) {
+
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * returns true if any of the symbols contains the given column
      */
@@ -119,6 +131,8 @@ public class Symbols {
             return ((Field) symbol).path();
         } else if (symbol instanceof Reference) {
             return ((Reference) symbol).ident().columnIdent();
+        } else if (symbol instanceof AliasedSymbol) {
+            return ((AliasedSymbol) symbol).alias();
         }
         return new OutputName(SymbolPrinter.INSTANCE.printSimple(symbol));
     }

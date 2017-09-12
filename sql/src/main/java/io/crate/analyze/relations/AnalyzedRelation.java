@@ -22,6 +22,7 @@
 package io.crate.analyze.relations;
 
 import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.exceptions.ColumnUnknownException;
 import io.crate.metadata.Path;
 import io.crate.metadata.table.Operation;
@@ -36,7 +37,13 @@ public interface AnalyzedRelation {
 
     Field getField(Path path, Operation operation) throws UnsupportedOperationException, ColumnUnknownException;
 
+    /**
+     * @deprecated Use {@link #outputs()}
+     */
+    @Deprecated
     List<Field> fields();
+
+    List<? extends Symbol> outputs();
 
     QualifiedName getQualifiedName();
 

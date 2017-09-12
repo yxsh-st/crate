@@ -23,7 +23,7 @@
 package io.crate.protocols.postgres;
 
 import io.crate.action.sql.ResultReceiver;
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.operation.collect.stats.JobsLogs;
 import io.crate.planner.Planner;
 import io.crate.sql.tree.Statement;
@@ -48,7 +48,7 @@ public interface Portal {
     Portal bind(String statementName, String query, Statement statement,
                 List<Object> params, @Nullable FormatCodes.FormatCode[] resultFormatCodes);
 
-    List<Field> describe();
+    List<? extends Symbol> describe();
 
     void execute(ResultReceiver resultReceiver, int maxRows);
 

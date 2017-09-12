@@ -23,7 +23,7 @@
 package io.crate.rest.action;
 
 import io.crate.action.sql.BaseResultReceiver;
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.breaker.RowAccounting;
 import io.crate.data.Row;
 import io.crate.operation.user.ExceptionAuthorizedValidator;
@@ -46,7 +46,7 @@ class RestResultSetReceiver extends BaseResultReceiver {
 
     private final RestChannel channel;
     private final ExceptionAuthorizedValidator exceptionAuthorizedValidator;
-    private final List<Field> outputFields;
+    private final List<? extends Symbol> outputFields;
     private final ResultToXContentBuilder builder;
     private long startTime;
     private final RowAccounting rowAccounting;
@@ -54,7 +54,7 @@ class RestResultSetReceiver extends BaseResultReceiver {
 
     RestResultSetReceiver(RestChannel channel,
                           ExceptionAuthorizedValidator exceptionAuthorizedValidator,
-                          List<Field> outputFields,
+                          List<? extends Symbol> outputFields,
                           long startTime,
                           RowAccounting rowAccounting,
                           boolean includeTypesOnResponse) {

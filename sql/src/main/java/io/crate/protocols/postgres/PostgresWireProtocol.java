@@ -25,7 +25,7 @@ package io.crate.protocols.postgres;
 import com.google.common.annotations.VisibleForTesting;
 import io.crate.action.sql.ResultReceiver;
 import io.crate.action.sql.SQLOperations;
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
 import io.crate.operation.auth.Authentication;
 import io.crate.operation.auth.AuthenticationMethod;
@@ -516,7 +516,7 @@ class PostgresWireProtocol {
     private void handleDescribeMessage(ByteBuf buffer, Channel channel) {
         byte type = buffer.readByte();
         String portalOrStatement = readCString(buffer);
-        Collection<Field> fields = session.describe((char) type, portalOrStatement);
+        Collection<? extends Symbol> fields = session.describe((char) type, portalOrStatement);
         if (fields == null) {
             Messages.sendNoData(channel);
         } else {
@@ -596,7 +596,7 @@ class PostgresWireProtocol {
         try {
             session.parse("", query, Collections.<DataType>emptyList());
             session.bind("", "", Collections.emptyList(), null);
-            List<Field> fields = session.describe('P', "");
+            List<? extends Symbol> fields = session.describe('P', "");
             if (fields == null) {
                 RowCountReceiver rowCountReceiver = new RowCountReceiver(query, channel, session.sessionContext());
                 session.execute("", 0, rowCountReceiver);
@@ -606,7 +606,7 @@ class PostgresWireProtocol {
                     query,
                     channel,
                     session.sessionContext(),
-                    Lists2.copyAndReplace(fields, Field::valueType),
+                    Lists2.copyAndReplace(fields, Symbol::valueType),
                     null
                 );
                 session.execute("", 0, resultSetReceiver);

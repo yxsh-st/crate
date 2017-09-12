@@ -855,8 +855,8 @@ public class ExpressionAnalyzer {
              * this would require {@link StatementAnalysisContext#startRelation} to somehow inherit the parent context
              */
             QueriedRelation relation = subQueryAnalyzer.analyze(node.getQuery());
-            List<Field> fields = relation.fields();
-            if (fields.size() > 1) {
+            List<? extends Symbol> outputs = relation.outputs();
+            if (outputs.size() > 1) {
                 throw new UnsupportedOperationException("Subqueries with more than 1 column are not supported.");
             }
             /*
@@ -867,7 +867,7 @@ public class ExpressionAnalyzer {
              *
              * However, we support a single column RowType through the SingleColumnTableType.
              */
-            DataType innerType = fields.get(0).valueType();
+            DataType innerType = outputs.get(0).valueType();
             SingleColumnTableType dataType = new SingleColumnTableType(innerType);
             final SelectSymbol.ResultType resultType;
             if (context.isArrayComparisonChild(node)) {

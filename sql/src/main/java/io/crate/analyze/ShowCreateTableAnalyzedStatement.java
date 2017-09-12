@@ -24,6 +24,7 @@ package io.crate.analyze;
 import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.AnalyzedRelationVisitor;
 import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.exceptions.ColumnUnknownException;
 import io.crate.metadata.OutputName;
 import io.crate.metadata.Path;
@@ -69,6 +70,11 @@ public class ShowCreateTableAnalyzedStatement implements AnalyzedStatement, Anal
 
     @Override
     public List<Field> fields() {
+        return fields;
+    }
+
+    @Override
+    public List<? extends Symbol> outputs() {
         return fields;
     }
 

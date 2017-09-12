@@ -22,7 +22,7 @@
 
 package io.crate.protocols.postgres;
 
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.data.Row;
 import io.crate.exceptions.SQLExceptions;
 import io.crate.protocols.postgres.types.PGType;
@@ -40,6 +40,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+
+import static io.crate.analyze.symbol.Symbols.pathFromSymbol;
 
 /**
  * Regular data packet is in the following format:
@@ -338,7 +340,7 @@ public class Messages {
      * <p>
      * See https://www.postgresql.org/docs/current/static/protocol-message-formats.html
      */
-    static void sendRowDescription(Channel channel, Collection<Field> columns, @Nullable FormatCodes.FormatCode[] formatCodes) {
+    static void sendRowDescription(Channel channel, Collection<? extends Symbol> columns, @Nullable FormatCodes.FormatCode[] formatCodes) {
         int length = 4 + 2;
         int columnSize = 4 + 2 + 4 + 2 + 4 + 2;
         ByteBuf buffer = channel.alloc().buffer(
@@ -349,8 +351,8 @@ public class Messages {
         buffer.writeShort(columns.size());
 
         int idx = 0;
-        for (Field column : columns) {
-            byte[] nameBytes = column.path().outputName().getBytes(StandardCharsets.UTF_8);
+        for (Symbol column : columns) {
+            byte[] nameBytes = pathFromSymbol(column).outputName().getBytes(StandardCharsets.UTF_8);
             length += nameBytes.length + 1;
             length += columnSize;
 

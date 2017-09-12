@@ -28,7 +28,7 @@ import io.crate.action.sql.SessionContext;
 import io.crate.analyze.Analysis;
 import io.crate.analyze.AnalyzedStatement;
 import io.crate.analyze.ParameterContext;
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.symbol.Symbols;
 import io.crate.concurrent.CountdownFutureCallback;
 import io.crate.data.BatchConsumer;
@@ -106,12 +106,12 @@ class BatchPortal extends AbstractPortal {
     }
 
     @Override
-    public List<Field> describe() {
+    public List<? extends Symbol> describe() {
         Analysis lastAnalysis = analysis.get(analysis.size() - 1);
         if (lastAnalysis.rootRelation() == null) {
             return null;
         }
-        List<Field> fields = lastAnalysis.rootRelation().fields();
+        List<? extends Symbol> fields = lastAnalysis.rootRelation().outputs();
         outputTypes.add(Symbols.typeView(fields));
         return fields;
     }

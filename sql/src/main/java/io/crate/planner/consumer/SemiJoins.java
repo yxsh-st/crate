@@ -92,7 +92,7 @@ final class SemiJoins {
      */
     @Nullable
     QueriedRelation tryRewrite(QueriedRelation rel, TransactionContext transactionCtx) {
-        WhereClause where = rel.querySpec().where();
+        WhereClause where = rel.where();
         if (!where.hasQuery()) {
             return null;
         }
@@ -157,7 +157,7 @@ final class SemiJoins {
     }
 
     private static void removeRewriteCandidatesFromWhere(QueriedRelation rel, Collection<Candidate> rewriteCandidates) {
-        rel.querySpec().where().replace(FuncReplacer.mapNodes(f -> {
+        rel.where().replace(FuncReplacer.mapNodes(f -> {
             for (Candidate rewriteCandidate : rewriteCandidates) {
                 if (rewriteCandidate.function.equals(f)) {
                     return Literal.BOOLEAN_TRUE;

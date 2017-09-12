@@ -60,7 +60,7 @@ public final class FetchPushDown {
         return new Builder<>(
             fetchRefs,
             pd.fetchSources(),
-            InputColumns.create(pd.remainingOutputs(), new InputColumns.Context(mss.querySpec().outputs())),
+            InputColumns.create(pd.remainingOutputs(), new InputColumns.Context(mss.outputs())),
             mss
         );
     }

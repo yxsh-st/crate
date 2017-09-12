@@ -25,6 +25,7 @@ package io.crate.testing;
 import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.AnalyzedRelationVisitor;
 import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.Path;
 import io.crate.metadata.table.Operation;
@@ -65,6 +66,11 @@ public class DummyRelation implements AnalyzedRelation {
 
     @Override
     public List<Field> fields() {
+        return null;
+    }
+
+    @Override
+    public List<? extends Symbol> outputs() {
         return null;
     }
 

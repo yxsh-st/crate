@@ -24,7 +24,7 @@ package io.crate.action.sql;
 
 import io.crate.analyze.Analyzer;
 import io.crate.analyze.relations.AnalyzedRelation;
-import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.Symbol;
 import io.crate.exceptions.SQLExceptions;
 import io.crate.executor.Executor;
 import io.crate.operation.collect.stats.JobsLogs;
@@ -256,7 +256,7 @@ public class SQLOperations {
             }
         }
 
-        public List<Field> describe(char type, String portalOrStatement) {
+        public List<? extends Symbol> describe(char type, String portalOrStatement) {
             LOGGER.debug("method=describe type={} portalOrStatement={}", type, portalOrStatement);
             switch (type) {
                 case 'P':
@@ -302,7 +302,7 @@ public class SQLOperations {
                         // statement without result set -> return null for NoData msg
                         return null;
                     }
-                    return analyzedRelation.fields();
+                    return analyzedRelation.outputs();
                 default:
                     throw new AssertionError("Unsupported type: " + type);
             }
