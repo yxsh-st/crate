@@ -26,6 +26,7 @@ import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Symbol;
 
 import java.util.ArrayList;
+import java.util.List;
 
 
 /**
@@ -59,11 +60,11 @@ public class SplitPoints {
         this.aggregates = new ArrayList<>(estimate);
     }
 
-    public ArrayList<Symbol> toCollect() {
+    public List<Symbol> toCollect() {
         return toCollect;
     }
 
-    public ArrayList<Function> aggregates() {
+    public List<Function> aggregates() {
         return aggregates;
     }
 }

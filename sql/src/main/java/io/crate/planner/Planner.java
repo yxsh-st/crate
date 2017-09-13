@@ -236,7 +236,7 @@ public class Planner extends AnalyzedStatementVisitor<Planner.Context, Plan> {
         this.clusterService = clusterService;
         this.consumingPlanner = new ConsumingPlanner(clusterService, functions, tableStats);
         this.copyStatementPlanner = new CopyStatementPlanner(clusterService);
-        this.selectStatementPlanner = new SelectStatementPlanner(consumingPlanner);
+        this.selectStatementPlanner = new SelectStatementPlanner(consumingPlanner, functions);
         normalizer = EvaluatingNormalizer.functionOnlyNormalizer(functions);
     }
 

@@ -28,20 +28,20 @@ import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.metadata.FunctionInfo;
 
-import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 
 final class SplitPointVisitor extends DefaultTraversalSymbolVisitor<SplitPointVisitor.Context, Void> {
 
     private static final SplitPointVisitor INSTANCE = new SplitPointVisitor();
 
     static class Context {
-        final ArrayList<Symbol> toCollect;
-        final ArrayList<Function> aggregates;
+        final List<Symbol> toCollect;
+        final List<Function> aggregates;
         boolean aggregateSeen;
         boolean collectingOutputs = true;
 
-        Context(ArrayList<Symbol> toCollect, ArrayList<Function> aggregates) {
+        Context(List<Symbol> toCollect, List<Function> aggregates) {
             this.toCollect = toCollect;
             this.aggregates = aggregates;
         }
