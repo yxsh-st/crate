@@ -87,7 +87,10 @@ class SelectStatementPlanner {
 
             if (true) {
                 LogicalPlanner logicalPlanner = new LogicalPlanner();
-                return logicalPlanner.plan(table, context, new ProjectionBuilder(functions));
+                return Merge.ensureOnHandler(
+                    logicalPlanner.plan(table, context, new ProjectionBuilder(functions)),
+                    context
+                );
             }
 
             if (querySpec.hasAggregates() || querySpec.groupBy().isPresent()) {

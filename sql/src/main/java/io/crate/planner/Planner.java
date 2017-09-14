@@ -151,7 +151,7 @@ public class Planner extends AnalyzedStatementVisitor<Planner.Context, Plan> {
         }
 
         @Nullable
-        private Integer toInteger(@Nullable Symbol symbol) {
+        public Integer toInteger(@Nullable Symbol symbol) {
             if (symbol == null) {
                 return null;
             }
