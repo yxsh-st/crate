@@ -54,7 +54,7 @@ import io.crate.planner.projection.AggregationProjection;
 import io.crate.planner.projection.EvalProjection;
 import io.crate.planner.projection.FilterProjection;
 import io.crate.planner.projection.GroupProjection;
-import io.crate.planner.projection.OrderedTopNProjection;
+import io.crate.planner.projection.Projection;
 import io.crate.planner.projection.TopNProjection;
 import io.crate.planner.projection.builder.InputColumns;
 import io.crate.planner.projection.builder.ProjectionBuilder;
@@ -349,15 +349,14 @@ public class LogicalPlanner {
                           OrderBy order) {
             Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, orderBy);
             if (plan.resultDescription().orderBy() == null) {
-                OrderedTopNProjection orderedTopNProjection = new OrderedTopNProjection(
-                    limitHint,
-                    offset,
+                Projection projection = ProjectionBuilder.topNOrEval(
                     source.outputs(),
-                    orderBy.orderBySymbols(),
-                    orderBy.reverseFlags(),
-                    orderBy.nullsFirst()
+                    orderBy,
+                    offset,
+                    limitHint,
+                    source.outputs()
                 );
-                plan.addProjection(orderedTopNProjection, null, null, PositionalOrderBy.of(orderBy, source.outputs()));
+                plan.addProjection(projection, null, null, PositionalOrderBy.of(orderBy, source.outputs()));
             }
             return plan;
         }
@@ -664,7 +663,7 @@ public class LogicalPlanner {
             this.source = source;
             this.aggregates = aggregates;
             this.groupKeys = groupKeys;
-            this.outputs = Lists2.concat(aggregates, groupKeys);
+            this.outputs = Lists2.concat(groupKeys, aggregates);
         }
 
         @Override
