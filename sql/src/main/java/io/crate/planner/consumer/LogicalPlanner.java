@@ -53,6 +53,7 @@ import io.crate.planner.node.dql.RoutedCollectPhase;
 import io.crate.planner.projection.AggregationProjection;
 import io.crate.planner.projection.EvalProjection;
 import io.crate.planner.projection.FilterProjection;
+import io.crate.planner.projection.GroupProjection;
 import io.crate.planner.projection.OrderedTopNProjection;
 import io.crate.planner.projection.TopNProjection;
 import io.crate.planner.projection.builder.InputColumns;
@@ -198,11 +199,11 @@ public class LogicalPlanner {
 
     public interface LogicalPlan {
 
-        Plan makePhysical(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          @Nullable OrderBy order);
+        Plan build(Planner.Context plannerContext,
+                   ProjectionBuilder projectionBuilder,
+                   int limitHint,
+                   int offset,
+                   @Nullable OrderBy order);
 
         LogicalPlan tryCollapse();
 
@@ -215,7 +216,7 @@ public class LogicalPlanner {
                      ProjectionBuilder projectionBuilder) {
         LogicalPlanner.LogicalPlan logicalPlan = plan(queriedRelation).tryCollapse();
 
-        return logicalPlan.makePhysical(
+        return logicalPlan.build(
             plannerContext,
             projectionBuilder,
             LogicalPlanner.NO_LIMIT,
@@ -230,8 +231,12 @@ public class LogicalPlanner {
 
         if (relation.aggregates().isPresent() && !relation.groupKeys().isPresent()) {
             plan = new HashAggregate(plan, relation.aggregates().orElse(Collections.emptyList()));
+        } else if (relation.groupKeys().isPresent()) {
+            plan = new GroupHashAggregate(
+                plan,
+                relation.aggregates().orElse(Collections.emptyList()),
+                relation.groupKeys().get());
         }
-        // TODO: groupingHashAggregate
         if (relation.having().isPresent()) {
             plan = new Filter(plan, relation.having().get());
         }
@@ -258,12 +263,12 @@ public class LogicalPlanner {
         }
 
         @Override
-        public Plan makePhysical(Planner.Context plannerContext,
-                                 ProjectionBuilder projectionBuilder,
-                                 int limitHint,
-                                 int offset,
-                                 @Nullable OrderBy order) {
-            Plan plan = source.makePhysical(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+            Plan plan = source.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
 
             if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
                 AggregationProjection fullAggregation = projectionBuilder.aggregationProjection(
@@ -337,12 +342,12 @@ public class LogicalPlanner {
         }
 
         @Override
-        public Plan makePhysical(Planner.Context plannerContext,
-                                 ProjectionBuilder projectionBuilder,
-                                 int limitHint,
-                                 int offset,
-                                 OrderBy order) {
-            Plan plan = source.makePhysical(plannerContext, projectionBuilder, limitHint, offset, orderBy);
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offset,
+                          OrderBy order) {
+            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, orderBy);
             if (plan.resultDescription().orderBy() == null) {
                 OrderedTopNProjection orderedTopNProjection = new OrderedTopNProjection(
                     limitHint,
@@ -385,11 +390,11 @@ public class LogicalPlanner {
         }
 
         @Override
-        public Plan makePhysical(Planner.Context plannerContext,
-                                 ProjectionBuilder projectionBuilder,
-                                 int limitHint,
-                                 int offset,
-                                 @Nullable OrderBy order) {
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
             if (relation instanceof QueriedTableRelation) {
                 QueriedTableRelation rel = (QueriedTableRelation) this.relation;
                 TableInfo tableInfo = rel.tableRelation().tableInfo();
@@ -445,12 +450,12 @@ public class LogicalPlanner {
         }
 
         @Override
-        public Plan makePhysical(Planner.Context plannerContext,
-                                 ProjectionBuilder projectionBuilder,
-                                 int limitHint,
-                                 int offset,
-                                 OrderBy order) {
-            Plan plan = source.makePhysical(plannerContext, projectionBuilder, limitHint, offset, order);
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offset,
+                          OrderBy order) {
+            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, order);
             FilterProjection filterProjection = ProjectionBuilder.filterProjection(source.outputs(), havingClause);
             filterProjection.requiredGranularity(RowGranularity.SHARD);
             plan.addProjection(filterProjection, null, null, null);
@@ -481,15 +486,15 @@ public class LogicalPlanner {
         }
 
         @Override
-        public Plan makePhysical(Planner.Context plannerContext,
-                                 ProjectionBuilder projectionBuilder,
-                                 int limitHint,
-                                 int offsetHint,
-                                 @Nullable OrderBy order) {
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offsetHint,
+                          @Nullable OrderBy order) {
             int limit = firstNonNull(plannerContext.toInteger(this.limit), NO_LIMIT);
             int offset = firstNonNull(plannerContext.toInteger(this.offset), 0);
 
-            Plan plan = source.makePhysical(plannerContext, projectionBuilder, limit + offset, 0, order);
+            Plan plan = source.build(plannerContext, projectionBuilder, limit + offset, 0, order);
             List<Symbol> inputCols = InputColumn.fromSymbols(source.outputs());
             if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
                 plan.addProjection(new TopNProjection(limit, offset, inputCols), null, null, null);
@@ -502,10 +507,12 @@ public class LogicalPlanner {
         @Override
         public LogicalPlan tryCollapse() {
             LogicalPlan collapsed = source.tryCollapse();
+            /*
             if (collapsed instanceof Order) {
                 Order order = (Order) collapsed;
                 return new TopN(order.source, order.orderBy, limit, offset).tryCollapse();
             }
+            */
             if (collapsed == source) {
                 return this;
             }
@@ -532,18 +539,19 @@ public class LogicalPlanner {
             this.offset = offset;
         }
 
-        public Plan makePhysical(Planner.Context plannerContext,
-                                 ProjectionBuilder projectionBuilder,
-                                 int limitHint,
-                                 int offset,
-                                 @Nullable OrderBy order) {
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
             // TODO:
-            return source.makePhysical(plannerContext, projectionBuilder, limitHint, offset, order);
+            return source.build(plannerContext, projectionBuilder, limitHint, offset, order);
         }
 
         @Override
         public LogicalPlan tryCollapse() {
             LogicalPlan collapsed = source.tryCollapse();
+            /*
             if (collapsed instanceof Collect) {
                 Collect collect = (Collect) collapsed;
                 return new TopNCollect(
@@ -555,6 +563,7 @@ public class LogicalPlanner {
                     offset
                 ).tryCollapse();
             }
+            */
             if (collapsed == source) {
                 return this;
             }
@@ -590,11 +599,11 @@ public class LogicalPlanner {
             this.offset = offset;
         }
 
-        public Plan makePhysical(Planner.Context plannerContext,
-                                 ProjectionBuilder projectionBuilder,
-                                 int limitHint,
-                                 int offset,
-                                 @Nullable OrderBy order) {
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
 
             throw new UnsupportedOperationException("TopNCollect NYI");
         }
@@ -622,15 +631,100 @@ public class LogicalPlanner {
         }
 
         @Override
-        public Plan makePhysical(Planner.Context plannerContext,
-                                 ProjectionBuilder projectionBuilder,
-                                 int limitHint,
-                                 int offset,
-                                 @Nullable OrderBy order) {
-            Plan plan = source.makePhysical(plannerContext, projectionBuilder, limitHint, offset, order);
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, order);
             InputColumns.Context ctx = new InputColumns.Context(source.outputs());
             plan.addProjection(new EvalProjection(InputColumns.create(outputs, ctx)), null, null, null);
             return plan;
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            return this;
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return outputs;
+        }
+    }
+
+    private class GroupHashAggregate implements LogicalPlan {
+
+        private final LogicalPlan source;
+        private final List<Function> aggregates;
+        private final List<Symbol> groupKeys;
+        private final List<Symbol> outputs;
+
+        GroupHashAggregate(LogicalPlan source, List<Function> aggregates, List<Symbol> groupKeys) {
+            this.source = source;
+            this.aggregates = aggregates;
+            this.groupKeys = groupKeys;
+            this.outputs = Lists2.concat(aggregates, groupKeys);
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+
+            Plan plan = source.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
+            if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
+                GroupProjection groupProjection = projectionBuilder.groupProjection(
+                    source.outputs(),
+                    groupKeys,
+                    aggregates,
+                    AggregateMode.ITER_FINAL,
+                    RowGranularity.CLUSTER
+                );
+                plan.addProjection(groupProjection, null, null, null);
+                return plan;
+            }
+            GroupProjection toPartial = projectionBuilder.groupProjection(
+                source.outputs(),
+                groupKeys,
+                aggregates,
+                AggregateMode.ITER_PARTIAL,
+                RowGranularity.SHARD
+            );
+            plan.addProjection(toPartial, null, null, null);
+
+            GroupProjection toFinal = projectionBuilder.groupProjection(
+                outputs,
+                groupKeys,
+                aggregates,
+                AggregateMode.PARTIAL_FINAL,
+                RowGranularity.CLUSTER
+            );
+
+            // TODO: Would need rowAuthority information on source to be able to optimize like ReduceOnCollectorGroupByConsumer
+            // TODO: To decide if a re-distribution step is useful numExpectedRows/cardinality information would be great.
+
+            return new Merge(
+                plan,
+                new MergePhase(
+                    plannerContext.jobId(),
+                    plannerContext.nextExecutionPhaseId(),
+                    "mergeOnHandler",
+                    plan.resultDescription().nodeIds().size(),
+                    Collections.singletonList(plannerContext.handlerNode()),
+                    plan.resultDescription().streamOutputs(),
+                    Collections.singletonList(toFinal),
+                    DistributionInfo.DEFAULT_SAME_NODE,
+                    null
+                ),
+                NO_LIMIT,
+                0,
+                outputs.size(),
+                NO_LIMIT,
+                null
+            );
         }
 
         @Override
