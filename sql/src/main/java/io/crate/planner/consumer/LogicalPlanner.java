@@ -22,6 +22,8 @@
 
 package io.crate.planner.consumer;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
 import io.crate.action.sql.SessionContext;
 import io.crate.analyze.HavingClause;
 import io.crate.analyze.OrderBy;
@@ -29,29 +31,44 @@ import io.crate.analyze.QueriedTableRelation;
 import io.crate.analyze.QuerySpec;
 import io.crate.analyze.WhereClause;
 import io.crate.analyze.relations.AnalyzedRelationVisitor;
+import io.crate.analyze.relations.DocTableRelation;
+import io.crate.analyze.relations.QueriedDocTable;
 import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.symbol.AggregateMode;
 import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.FieldsVisitor;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.InputColumn;
 import io.crate.analyze.symbol.Literal;
+import io.crate.analyze.symbol.RefVisitor;
 import io.crate.analyze.symbol.Symbol;
+import io.crate.analyze.symbol.Symbols;
 import io.crate.collections.Lists2;
 import io.crate.exceptions.ColumnUnknownException;
+import io.crate.metadata.DocReferences;
 import io.crate.metadata.Path;
 import io.crate.metadata.RowGranularity;
+import io.crate.metadata.doc.DocSysColumns;
+import io.crate.metadata.doc.DocTableInfo;
 import io.crate.metadata.table.Operation;
 import io.crate.metadata.table.TableInfo;
 import io.crate.planner.Merge;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
 import io.crate.planner.PositionalOrderBy;
+import io.crate.planner.ReaderAllocations;
 import io.crate.planner.distribution.DistributionInfo;
+import io.crate.planner.fetch.FetchRewriter;
 import io.crate.planner.node.ExecutionPhases;
 import io.crate.planner.node.dql.MergePhase;
+import io.crate.planner.node.dql.PlanWithFetchDescription;
+import io.crate.planner.node.dql.QueryThenFetch;
 import io.crate.planner.node.dql.RoutedCollectPhase;
+import io.crate.planner.node.fetch.FetchPhase;
+import io.crate.planner.node.fetch.FetchSource;
 import io.crate.planner.projection.AggregationProjection;
 import io.crate.planner.projection.EvalProjection;
+import io.crate.planner.projection.FetchProjection;
 import io.crate.planner.projection.FilterProjection;
 import io.crate.planner.projection.GroupProjection;
 import io.crate.planner.projection.Projection;
@@ -64,15 +81,642 @@ import io.crate.sql.tree.QualifiedName;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
 
 public class LogicalPlanner {
 
     public static final int NO_LIMIT = -1;
+
+
+    /**
+     * LogicalPlan is a tree of "Operators"
+     * This is a representation of the logical order of operators that need to be executed to produce a correct result.
+     *
+     * {@link #build(Planner.Context, ProjectionBuilder, Set, int, int, OrderBy)} is used to create the
+     * actual "physical" execution plan.
+     *
+     * A Operator is something like Limit, OrderBy, HashAggregate, Join, Union, Collect
+     * <pre>
+     *     select x, y, z from t1 where x = 10 order by x limit 10:
+     *
+     *     Limit 10
+     *        |
+     *     Order By x
+     *         |
+     *     Collect [x, y, z]
+     * </pre>
+     *
+     * {@link #build(Planner.Context, ProjectionBuilder, Set, int, int, OrderBy)} is called on the "root" and flows down.
+     * Each time each operator may provide "hints" to the children so that they can decide to eagerly apply parts of the
+     * operations
+     *
+     * This allows us to create execution plans as follows::
+     *
+     * <pre>
+     *     select x, y, z from t1 where order by x limit 10;
+     *
+     *
+     *          Merge
+     *         /  limit10
+     *       /         \
+     *     Collect     Collect
+     *     limit 10    limit 10
+     *
+     * </pre>
+     */
+    public interface LogicalPlan {
+
+        // TODO: describe usedColumns/limit/offset/orderBy
+        Plan build(Planner.Context plannerContext,
+                   ProjectionBuilder projectionBuilder,
+                   Set<Symbol> usedColumns,
+                   int limitHint,
+                   int offset,
+                   @Nullable OrderBy order);
+
+        // TODO: not sure if required / useful
+        LogicalPlan tryCollapse();
+
+        List<Symbol> outputs();
+    }
+
+    public Plan plan(QueriedRelation queriedRelation,
+                     Planner.Context plannerContext,
+                     ProjectionBuilder projectionBuilder) {
+        LogicalPlanner.LogicalPlan logicalPlan = plan(queriedRelation).tryCollapse();
+
+        return logicalPlan.build(
+            plannerContext,
+            projectionBuilder,
+            Collections.emptySet(),
+            LogicalPlanner.NO_LIMIT,
+            0,
+            null
+        );
+    }
+
+    private LogicalPlan plan(QueriedRelation queriedRelation) {
+        WrappedRelation relation = new WrappedRelation(queriedRelation);
+        LogicalPlan plan = new Collect(queriedRelation, relation.toCollect(), relation.where());
+
+        if (relation.aggregates().isPresent() && !relation.groupKeys().isPresent()) {
+            plan = new HashAggregate(plan, relation.aggregates().orElse(Collections.emptyList()));
+        } else if (relation.groupKeys().isPresent()) {
+            plan = new GroupHashAggregate(
+                plan,
+                relation.aggregates().orElse(Collections.emptyList()),
+                relation.groupKeys().get());
+        }
+        if (relation.having().isPresent()) {
+            plan = new Filter(plan, relation.having().get());
+        }
+        if (relation.orderBy().isPresent()) {
+            plan = new Order(plan, relation.orderBy().get());
+        }
+        if (relation.limit().isPresent()) {
+            plan = new Limit(plan, relation.limit().get(), relation.offset().orElse(Literal.of(0L)));
+        }
+        // TODO: maybe merge Fetch and Eval
+        // or do the fetch-planning before build is called, so that it's possible to figure out if fetch is used here
+        plan = new Fetch(plan, relation.outputs());
+        if (!plan.outputs().equals(relation.outputs())) {
+            plan = new Eval(plan, relation.outputs());
+        }
+        return plan;
+    }
+
+    private class HashAggregate implements LogicalPlan {
+
+        private final LogicalPlan source;
+        private final List<Function> aggregates;
+        private final Set<Symbol> usedColumns;
+
+        HashAggregate(LogicalPlan source, List<Function> aggregates) {
+            this.source = source;
+            this.aggregates = aggregates;
+            this.usedColumns = extractColumns(aggregates);
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+            Plan plan = source.build(plannerContext, projectionBuilder, this.usedColumns, NO_LIMIT, 0, null);
+
+            if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
+                AggregationProjection fullAggregation = projectionBuilder.aggregationProjection(
+                    source.outputs(),
+                    aggregates,
+                    AggregateMode.ITER_FINAL,
+                    RowGranularity.CLUSTER
+                );
+                plan.addProjection(fullAggregation, null, null, null);
+                return plan;
+            }
+
+            AggregationProjection toPartial = projectionBuilder.aggregationProjection(
+                source.outputs(),
+                aggregates,
+                AggregateMode.ITER_PARTIAL,
+                RowGranularity.CLUSTER
+            );
+            plan.addProjection(toPartial, null, null, null);
+
+            AggregationProjection toFinal = projectionBuilder.aggregationProjection(
+                aggregates,
+                aggregates,
+                AggregateMode.PARTIAL_FINAL,
+                RowGranularity.CLUSTER
+            );
+            return new Merge(
+                plan,
+                new MergePhase(
+                    plannerContext.jobId(),
+                    plannerContext.nextExecutionPhaseId(),
+                    "mergeOnHandler",
+                    plan.resultDescription().nodeIds().size(),
+                    Collections.singletonList(plannerContext.handlerNode()),
+                    plan.resultDescription().streamOutputs(),
+                    Collections.singletonList(toFinal),
+                    DistributionInfo.DEFAULT_SAME_NODE,
+                    null
+                ),
+                NO_LIMIT,
+                0,
+                aggregates.size(),
+                1,
+                null
+            );
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            LogicalPlan collapsed = source.tryCollapse();
+            if (collapsed == source) {
+                return this;
+            }
+            return new HashAggregate(collapsed, aggregates);
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return new ArrayList<>(aggregates);
+        }
+    }
+
+    static class Order implements LogicalPlan {
+
+        private final LogicalPlan source;
+        private final OrderBy orderBy;
+        private final Set<Symbol> usedColumns;
+
+        Order(LogicalPlan source, OrderBy orderBy) {
+            this.source = source;
+            this.orderBy = orderBy;
+            this.usedColumns = extractColumns(orderBy.orderBySymbols());
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offset,
+                          OrderBy order) {
+            HashSet<Symbol> allUsedColumns = new HashSet<>(this.usedColumns);
+            allUsedColumns.addAll(usedColumns);
+
+            Plan plan = source.build(plannerContext, projectionBuilder, allUsedColumns, limitHint, offset, orderBy);
+            if (plan.resultDescription().orderBy() == null) {
+                Projection projection = ProjectionBuilder.topNOrEval(
+                    source.outputs(),
+                    orderBy,
+                    offset,
+                    limitHint,
+                    source.outputs()
+                );
+                plan.addProjection(projection, null, null, PositionalOrderBy.of(orderBy, source.outputs()));
+            }
+            return plan;
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            LogicalPlan collapsed = source.tryCollapse();
+            if (collapsed == source) {
+                return this;
+            }
+            return new Order(collapsed, orderBy);
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return source.outputs();
+        }
+    }
+
+    static class Collect implements LogicalPlan {
+
+        private final QueriedRelation relation;
+        private final WhereClause where;
+
+        private List<Symbol> toCollect;
+
+        Collect(QueriedRelation relation, List<Symbol> toCollect, WhereClause where) {
+            this.relation = relation;
+            this.toCollect = toCollect;
+            this.where = where;
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+            FetchRewriter.FetchDescription fetchDescription = null;
+            // TODO: dispatch using a visitor
+            if (relation instanceof QueriedTableRelation) {
+                QueriedTableRelation rel = (QueriedTableRelation) this.relation;
+                TableInfo tableInfo = rel.tableRelation().tableInfo();
+
+                // TODO: extract/rework this
+                if (tableInfo instanceof DocTableInfo) {
+                    Set<Symbol> columnsToCollect = extractColumns(toCollect);
+                    Sets.SetView<Symbol> unusedColumns = Sets.difference(columnsToCollect, usedColumns);
+                    ArrayList<Symbol> fetchable = new ArrayList<>();
+                    for (Symbol unusedColumn : unusedColumns) {
+                        if (!Symbols.containsColumn(unusedColumn, DocSysColumns.SCORE)) {
+                            fetchable.add(unusedColumn);
+                        }
+                    }
+                    if (!fetchable.isEmpty()) {
+                        QuerySpec qs = new QuerySpec();
+                        qs.outputs(new ArrayList<>(unusedColumns));
+                        fetchDescription = FetchRewriter.rewrite(new QueriedDocTable(((DocTableRelation) rel.tableRelation()), qs));
+
+                        toCollect = new ArrayList<>(usedColumns.size() + 1);
+                        toCollect.addAll(fetchDescription.preFetchOutputs());
+                        toCollect.addAll(usedColumns);
+                    }
+                }
+                SessionContext sessionContext = plannerContext.transactionContext().sessionContext();
+                RoutedCollectPhase collectPhase = new RoutedCollectPhase(
+                    plannerContext.jobId(),
+                    plannerContext.nextExecutionPhaseId(),
+                    "collect",
+                    plannerContext.allocateRouting(
+                        tableInfo,
+                        where,
+                        null,
+                        sessionContext),
+                    tableInfo.rowGranularity(),
+                    toCollect,
+                    Collections.emptyList(),
+                    where,
+                    DistributionInfo.DEFAULT_BROADCAST,
+                    sessionContext.user()
+                );
+                collectPhase.orderBy(order);
+                io.crate.planner.node.dql.Collect collect = new io.crate.planner.node.dql.Collect(
+                    collectPhase,
+                    limitHint,
+                    offset,
+                    toCollect.size(),
+                    limitHint,
+                    PositionalOrderBy.of(order, toCollect)
+                );
+                if (fetchDescription == null) {
+                    return collect;
+                }
+                return new PlanWithFetchDescription(collect, fetchDescription);
+            }
+            throw new UnsupportedOperationException("NYI");
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            return this;
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return toCollect;
+        }
+    }
+
+    private class Filter implements LogicalPlan {
+
+        private final LogicalPlan source;
+        private final HavingClause havingClause;
+        private final Set<Symbol> usedColumns;
+
+        Filter(LogicalPlan source, HavingClause havingClause) {
+            this.source = source;
+            this.havingClause = havingClause;
+            this.usedColumns = extractColumns(Collections.singletonList(havingClause.query()));
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offset,
+                          OrderBy order) {
+            HashSet<Symbol> allUsedColumns = new HashSet<>(this.usedColumns);
+            allUsedColumns.addAll(usedColumns);
+
+            Plan plan = source.build(plannerContext, projectionBuilder, allUsedColumns, limitHint, offset, order);
+            FilterProjection filterProjection = ProjectionBuilder.filterProjection(source.outputs(), havingClause);
+            filterProjection.requiredGranularity(RowGranularity.SHARD);
+            plan.addProjection(filterProjection, null, null, null);
+            return plan;
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            return this;
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return source.outputs();
+        }
+    }
+
+    private class Limit implements LogicalPlan {
+
+        private final LogicalPlan source;
+        private final Symbol limit;
+        private final Symbol offset;
+
+        Limit(LogicalPlan source, Symbol limit, Symbol offset) {
+            this.source = source;
+            this.limit = limit;
+            this.offset = offset;
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offsetHint,
+                          @Nullable OrderBy order) {
+            int limit = firstNonNull(plannerContext.toInteger(this.limit), NO_LIMIT);
+            int offset = firstNonNull(plannerContext.toInteger(this.offset), 0);
+
+            Plan plan = source.build(plannerContext, projectionBuilder, usedColumns, limit + offset, 0, order);
+            List<Symbol> inputCols = InputColumn.fromSymbols(source.outputs());
+            if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
+                plan.addProjection(new TopNProjection(limit, offset, inputCols), null, null, null);
+            } else {
+                plan.addProjection(new TopNProjection(limit + offset, 0, inputCols), limit, offset, null);
+            }
+            return plan;
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            LogicalPlan collapsed = source.tryCollapse();
+            /*
+            if (collapsed instanceof Order) {
+                Order order = (Order) collapsed;
+                return new TopN(order.source, order.orderBy, limit, offset).tryCollapse();
+            }
+            */
+            if (collapsed == source) {
+                return this;
+            }
+            return new Limit(collapsed, limit, offset);
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return source.outputs();
+        }
+    }
+
+
+    private class Eval implements LogicalPlan {
+
+        private final LogicalPlan source;
+        private final List<Symbol> outputs;
+        private final Set<Symbol> usedColumns;
+
+        Eval(LogicalPlan source, List<Symbol> outputs) {
+            this.source = source;
+            this.outputs = outputs;
+            this.usedColumns = extractColumns(outputs);
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+            HashSet<Symbol> allUsedColumns = new HashSet<>(this.usedColumns);
+            allUsedColumns.addAll(usedColumns);
+
+            Plan plan = source.build(plannerContext, projectionBuilder, allUsedColumns, limitHint, offset, order);
+            InputColumns.Context ctx = new InputColumns.Context(source.outputs());
+            plan.addProjection(new EvalProjection(InputColumns.create(outputs, ctx)), null, null, null);
+            return plan;
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            return this;
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return outputs;
+        }
+    }
+
+    private class GroupHashAggregate implements LogicalPlan {
+
+        private final LogicalPlan source;
+        private final List<Function> aggregates;
+        private final List<Symbol> groupKeys;
+        private final List<Symbol> outputs;
+        private final Set<Symbol> usedColumns;
+
+        GroupHashAggregate(LogicalPlan source, List<Function> aggregates, List<Symbol> groupKeys) {
+            this.source = source;
+            this.aggregates = aggregates;
+            this.groupKeys = groupKeys;
+            this.outputs = Lists2.concat(groupKeys, aggregates);
+            this.usedColumns = extractColumns(outputs);
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+
+            Plan plan = source.build(plannerContext, projectionBuilder, this.usedColumns, NO_LIMIT, 0, null);
+            if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
+                GroupProjection groupProjection = projectionBuilder.groupProjection(
+                    source.outputs(),
+                    groupKeys,
+                    aggregates,
+                    AggregateMode.ITER_FINAL,
+                    RowGranularity.CLUSTER
+                );
+                plan.addProjection(groupProjection, null, null, null);
+                return plan;
+            }
+            GroupProjection toPartial = projectionBuilder.groupProjection(
+                source.outputs(),
+                groupKeys,
+                aggregates,
+                AggregateMode.ITER_PARTIAL,
+                RowGranularity.SHARD
+            );
+            plan.addProjection(toPartial, null, null, null);
+
+            GroupProjection toFinal = projectionBuilder.groupProjection(
+                outputs,
+                groupKeys,
+                aggregates,
+                AggregateMode.PARTIAL_FINAL,
+                RowGranularity.CLUSTER
+            );
+
+            // TODO: Would need rowAuthority information on source to be able to optimize like ReduceOnCollectorGroupByConsumer
+            // TODO: To decide if a re-distribution step is useful numExpectedRows/cardinality information would be great.
+
+            return new Merge(
+                plan,
+                new MergePhase(
+                    plannerContext.jobId(),
+                    plannerContext.nextExecutionPhaseId(),
+                    "mergeOnHandler",
+                    plan.resultDescription().nodeIds().size(),
+                    Collections.singletonList(plannerContext.handlerNode()),
+                    plan.resultDescription().streamOutputs(),
+                    Collections.singletonList(toFinal),
+                    DistributionInfo.DEFAULT_SAME_NODE,
+                    null
+                ),
+                NO_LIMIT,
+                0,
+                outputs.size(),
+                NO_LIMIT,
+                null
+            );
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            return this;
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return outputs;
+        }
+    }
+
+    private class Fetch implements LogicalPlan {
+
+        private final LogicalPlan source;
+        private final List<Symbol> outputs;
+
+        Fetch(LogicalPlan source, List<Symbol> outputs) {
+            this.source = source;
+            this.outputs = outputs;
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+            Plan plan = source.build(plannerContext, projectionBuilder, Collections.emptySet(), limitHint, offset, order);
+            FetchRewriter.FetchDescription fetchDescription = plan.resultDescription().fetchDescription();
+            if (fetchDescription == null) {
+                InputColumns.Context ctx = new InputColumns.Context(source.outputs());
+                plan.addProjection(new EvalProjection(InputColumns.create(outputs, ctx)), null, null, null);
+                return plan;
+            }
+            if (plan instanceof PlanWithFetchDescription) {
+                plan = ((PlanWithFetchDescription) plan).subPlan();
+            }
+            plan = Merge.ensureOnHandler(plan, plannerContext);
+            // TODO: change how this is created (utilize outputs)
+            ReaderAllocations readerAllocations = plannerContext.buildReaderAllocations();
+            FetchPhase fetchPhase = new FetchPhase(
+                plannerContext.nextExecutionPhaseId(),
+                readerAllocations.nodeReaders().keySet(),
+                readerAllocations.bases(),
+                readerAllocations.tableIndices(),
+                fetchDescription.fetchRefs()
+            );
+            InputColumn fetchId = new InputColumn(0);
+            FetchSource fetchSource = new FetchSource(
+                fetchDescription.partitionedByColumns(),
+                Collections.singletonList(fetchId),
+                fetchDescription.fetchRefs()
+            );
+            FetchProjection fetchProjection = new FetchProjection(
+                fetchPhase.phaseId(),
+                plannerContext.fetchSize(),
+                ImmutableMap.of(fetchDescription.table(), fetchSource),
+                FetchRewriter.generateFetchOutputs(fetchDescription),
+                readerAllocations.nodeReaders(),
+                readerAllocations.indices(),
+                readerAllocations.indicesToIdents()
+            );
+            plan.addProjection(fetchProjection, null, null, null);
+            InputColumns.Context ctx = new InputColumns.Context(fetchDescription.postFetchOutputs);
+            List<Symbol> inputCols = InputColumns.create(Lists2.copyAndReplace(outputs, DocReferences::toSourceLookup), ctx);
+            plan.addProjection(new EvalProjection(inputCols), null, null, null);
+            return new QueryThenFetch(plan, fetchPhase);
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            return this;
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return outputs;
+        }
+    }
+
+    private static Set<Symbol> extractColumns(Collection<? extends Symbol> symbols) {
+        LinkedHashSet<Symbol> columns = new LinkedHashSet<>();
+        for (Symbol symbol : symbols) {
+            RefVisitor.visitRefs(symbol, columns::add);
+            FieldsVisitor.visitFields(symbol, columns::add);
+        }
+        return columns;
+    }
+
 
     interface NewQueriedRelation extends QueriedRelation {
 
@@ -103,7 +747,7 @@ public class LogicalPlanner {
         private final Optional<List<Function>> aggregates;
         private final List<Symbol> toCollect;
 
-        public WrappedRelation(QueriedRelation relation) {
+        WrappedRelation(QueriedRelation relation) {
             this.relation = relation;
             SplitPoints splitPoints = SplitPoints.create(relation.querySpec());
             if (splitPoints.aggregates().isEmpty()) {
@@ -194,546 +838,6 @@ public class LogicalPlanner {
         @Override
         public void setQualifiedName(@Nonnull QualifiedName qualifiedName) {
             relation.setQualifiedName(qualifiedName);
-        }
-    }
-
-    public interface LogicalPlan {
-
-        Plan build(Planner.Context plannerContext,
-                   ProjectionBuilder projectionBuilder,
-                   int limitHint,
-                   int offset,
-                   @Nullable OrderBy order);
-
-        LogicalPlan tryCollapse();
-
-        List<Symbol> outputs();
-    }
-
-
-    public Plan plan(QueriedRelation queriedRelation,
-                     Planner.Context plannerContext,
-                     ProjectionBuilder projectionBuilder) {
-        LogicalPlanner.LogicalPlan logicalPlan = plan(queriedRelation).tryCollapse();
-
-        return logicalPlan.build(
-            plannerContext,
-            projectionBuilder,
-            LogicalPlanner.NO_LIMIT,
-            0,
-            null
-        );
-    }
-
-    private LogicalPlan plan(QueriedRelation queriedRelation) {
-        WrappedRelation relation = new WrappedRelation(queriedRelation);
-        LogicalPlan plan = new Collect(queriedRelation, relation.toCollect(), relation.where());
-
-        if (relation.aggregates().isPresent() && !relation.groupKeys().isPresent()) {
-            plan = new HashAggregate(plan, relation.aggregates().orElse(Collections.emptyList()));
-        } else if (relation.groupKeys().isPresent()) {
-            plan = new GroupHashAggregate(
-                plan,
-                relation.aggregates().orElse(Collections.emptyList()),
-                relation.groupKeys().get());
-        }
-        if (relation.having().isPresent()) {
-            plan = new Filter(plan, relation.having().get());
-        }
-        if (relation.orderBy().isPresent()) {
-            plan = new Order(plan, relation.orderBy().get());
-        }
-        if (relation.limit().isPresent()) {
-            plan = new Limit(plan, relation.limit().get(), relation.offset().orElse(Literal.of(0L)));
-        }
-        if (!plan.outputs().equals(queriedRelation.querySpec().outputs())) {
-            plan = new Eval(plan, queriedRelation.querySpec().outputs());
-        }
-        return plan;
-    }
-
-    private class HashAggregate implements LogicalPlan {
-
-        private final LogicalPlan source;
-        private final List<Function> aggregates;
-
-        HashAggregate(LogicalPlan source, List<Function> aggregates) {
-            this.source = source;
-            this.aggregates = aggregates;
-        }
-
-        @Override
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          @Nullable OrderBy order) {
-            Plan plan = source.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
-
-            if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
-                AggregationProjection fullAggregation = projectionBuilder.aggregationProjection(
-                    source.outputs(),
-                    aggregates,
-                    AggregateMode.ITER_FINAL,
-                    RowGranularity.CLUSTER
-                );
-                plan.addProjection(fullAggregation, null, null, null);
-                return plan;
-            }
-
-            AggregationProjection toPartial = projectionBuilder.aggregationProjection(
-                source.outputs(),
-                aggregates,
-                AggregateMode.ITER_PARTIAL,
-                RowGranularity.CLUSTER
-            );
-            plan.addProjection(toPartial, null, null, null);
-
-            AggregationProjection toFinal = projectionBuilder.aggregationProjection(
-                aggregates,
-                aggregates,
-                AggregateMode.PARTIAL_FINAL,
-                RowGranularity.CLUSTER
-            );
-            return new Merge(
-                plan,
-                new MergePhase(
-                    plannerContext.jobId(),
-                    plannerContext.nextExecutionPhaseId(),
-                    "mergeOnHandler",
-                    plan.resultDescription().nodeIds().size(),
-                    Collections.singletonList(plannerContext.handlerNode()),
-                    plan.resultDescription().streamOutputs(),
-                    Collections.singletonList(toFinal),
-                    DistributionInfo.DEFAULT_SAME_NODE,
-                    null
-                ),
-                NO_LIMIT,
-                0,
-                aggregates.size(),
-                1,
-                null
-            );
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            LogicalPlan collapsed = source.tryCollapse();
-            if (collapsed == source) {
-                return this;
-            }
-            return new HashAggregate(collapsed, aggregates);
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return new ArrayList<>(aggregates);
-        }
-    }
-
-    static class Order implements LogicalPlan {
-
-        private final LogicalPlan source;
-        private final OrderBy orderBy;
-
-        Order(LogicalPlan source, OrderBy orderBy) {
-            this.source = source;
-            this.orderBy = orderBy;
-        }
-
-        @Override
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          OrderBy order) {
-            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, orderBy);
-            if (plan.resultDescription().orderBy() == null) {
-                Projection projection = ProjectionBuilder.topNOrEval(
-                    source.outputs(),
-                    orderBy,
-                    offset,
-                    limitHint,
-                    source.outputs()
-                );
-                plan.addProjection(projection, null, null, PositionalOrderBy.of(orderBy, source.outputs()));
-            }
-            return plan;
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            LogicalPlan collapsed = source.tryCollapse();
-            if (collapsed == source) {
-                return this;
-            }
-            return new Order(collapsed, orderBy);
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return source.outputs();
-        }
-    }
-
-    static class Collect implements LogicalPlan {
-
-        private final QueriedRelation relation;
-        private final List<Symbol> toCollect;
-        private final WhereClause where;
-
-        Collect(QueriedRelation relation, List<Symbol> toCollect, WhereClause where) {
-            this.relation = relation;
-            this.toCollect = toCollect;
-            this.where = where;
-        }
-
-        @Override
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          @Nullable OrderBy order) {
-            if (relation instanceof QueriedTableRelation) {
-                QueriedTableRelation rel = (QueriedTableRelation) this.relation;
-                TableInfo tableInfo = rel.tableRelation().tableInfo();
-                SessionContext sessionContext = plannerContext.transactionContext().sessionContext();
-                RoutedCollectPhase collectPhase = new RoutedCollectPhase(
-                    plannerContext.jobId(),
-                    plannerContext.nextExecutionPhaseId(),
-                    "collect",
-                    plannerContext.allocateRouting(
-                        tableInfo,
-                        where,
-                        null,
-                        sessionContext),
-                    tableInfo.rowGranularity(),
-                    toCollect,
-                    Collections.emptyList(),
-                    where,
-                    DistributionInfo.DEFAULT_BROADCAST,
-                    sessionContext.user()
-                );
-                collectPhase.orderBy(order);
-                return new io.crate.planner.node.dql.Collect(
-                    collectPhase,
-                    limitHint,
-                    offset,
-                    toCollect.size(),
-                    limitHint,
-                    PositionalOrderBy.of(order, toCollect)
-                );
-            }
-            throw new UnsupportedOperationException("NYI");
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            return this;
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return toCollect;
-        }
-    }
-
-    private class Filter implements LogicalPlan {
-
-        private final LogicalPlan source;
-        private final HavingClause havingClause;
-
-        Filter(LogicalPlan source, HavingClause havingClause) {
-            this.source = source;
-            this.havingClause = havingClause;
-        }
-
-        @Override
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          OrderBy order) {
-            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, order);
-            FilterProjection filterProjection = ProjectionBuilder.filterProjection(source.outputs(), havingClause);
-            filterProjection.requiredGranularity(RowGranularity.SHARD);
-            plan.addProjection(filterProjection, null, null, null);
-            return plan;
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            return this;
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return source.outputs();
-        }
-    }
-
-    private class Limit implements LogicalPlan {
-
-        private final LogicalPlan source;
-        private final Symbol limit;
-        private final Symbol offset;
-
-        Limit(LogicalPlan source, Symbol limit, Symbol offset) {
-            this.source = source;
-            this.limit = limit;
-            this.offset = offset;
-        }
-
-        @Override
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offsetHint,
-                          @Nullable OrderBy order) {
-            int limit = firstNonNull(plannerContext.toInteger(this.limit), NO_LIMIT);
-            int offset = firstNonNull(plannerContext.toInteger(this.offset), 0);
-
-            Plan plan = source.build(plannerContext, projectionBuilder, limit + offset, 0, order);
-            List<Symbol> inputCols = InputColumn.fromSymbols(source.outputs());
-            if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
-                plan.addProjection(new TopNProjection(limit, offset, inputCols), null, null, null);
-            } else {
-                plan.addProjection(new TopNProjection(limit + offset, 0, inputCols), limit, offset, null);
-            }
-            return plan;
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            LogicalPlan collapsed = source.tryCollapse();
-            /*
-            if (collapsed instanceof Order) {
-                Order order = (Order) collapsed;
-                return new TopN(order.source, order.orderBy, limit, offset).tryCollapse();
-            }
-            */
-            if (collapsed == source) {
-                return this;
-            }
-            return new Limit(collapsed, limit, offset);
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return source.outputs();
-        }
-    }
-
-    private class TopN implements LogicalPlan {
-
-        private final LogicalPlan source;
-        private final OrderBy orderBy;
-        private final Symbol limit;
-        private final Symbol offset;
-
-        public TopN(LogicalPlan source, OrderBy orderBy, Symbol limit, Symbol offset) {
-            this.source = source;
-            this.orderBy = orderBy;
-            this.limit = limit;
-            this.offset = offset;
-        }
-
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          @Nullable OrderBy order) {
-            // TODO:
-            return source.build(plannerContext, projectionBuilder, limitHint, offset, order);
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            LogicalPlan collapsed = source.tryCollapse();
-            /*
-            if (collapsed instanceof Collect) {
-                Collect collect = (Collect) collapsed;
-                return new TopNCollect(
-                    collect.relation,
-                    collect.toCollect,
-                    collect.where,
-                    orderBy,
-                    limit,
-                    offset
-                ).tryCollapse();
-            }
-            */
-            if (collapsed == source) {
-                return this;
-            }
-            return new TopN(collapsed, orderBy, limit, offset);
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return source.outputs();
-        }
-    }
-
-    private static class TopNCollect implements LogicalPlan {
-
-        private final QueriedRelation relation;
-        private final List<Symbol> toCollect;
-        private final WhereClause where;
-        private final OrderBy orderBy;
-        private final Symbol limit;
-        private final Symbol offset;
-
-        TopNCollect(QueriedRelation relation,
-                    List<Symbol> toCollect,
-                    WhereClause where,
-                    OrderBy orderBy,
-                    @Nullable Symbol limit,
-                    @Nullable Symbol offset) {
-            this.relation = relation;
-            this.toCollect = toCollect;
-            this.where = where;
-            this.orderBy = orderBy;
-            this.limit = limit;
-            this.offset = offset;
-        }
-
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          @Nullable OrderBy order) {
-
-            throw new UnsupportedOperationException("TopNCollect NYI");
-        }
-
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            return this;
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return toCollect;
-        }
-    }
-
-    private class Eval implements LogicalPlan {
-
-        private final LogicalPlan source;
-        private final List<Symbol> outputs;
-
-        Eval(LogicalPlan source, List<Symbol> outputs) {
-            this.source = source;
-            this.outputs = outputs;
-        }
-
-        @Override
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          @Nullable OrderBy order) {
-            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, order);
-            InputColumns.Context ctx = new InputColumns.Context(source.outputs());
-            plan.addProjection(new EvalProjection(InputColumns.create(outputs, ctx)), null, null, null);
-            return plan;
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            return this;
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return outputs;
-        }
-    }
-
-    private class GroupHashAggregate implements LogicalPlan {
-
-        private final LogicalPlan source;
-        private final List<Function> aggregates;
-        private final List<Symbol> groupKeys;
-        private final List<Symbol> outputs;
-
-        GroupHashAggregate(LogicalPlan source, List<Function> aggregates, List<Symbol> groupKeys) {
-            this.source = source;
-            this.aggregates = aggregates;
-            this.groupKeys = groupKeys;
-            this.outputs = Lists2.concat(groupKeys, aggregates);
-        }
-
-        @Override
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          int limitHint,
-                          int offset,
-                          @Nullable OrderBy order) {
-
-            Plan plan = source.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
-            if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
-                GroupProjection groupProjection = projectionBuilder.groupProjection(
-                    source.outputs(),
-                    groupKeys,
-                    aggregates,
-                    AggregateMode.ITER_FINAL,
-                    RowGranularity.CLUSTER
-                );
-                plan.addProjection(groupProjection, null, null, null);
-                return plan;
-            }
-            GroupProjection toPartial = projectionBuilder.groupProjection(
-                source.outputs(),
-                groupKeys,
-                aggregates,
-                AggregateMode.ITER_PARTIAL,
-                RowGranularity.SHARD
-            );
-            plan.addProjection(toPartial, null, null, null);
-
-            GroupProjection toFinal = projectionBuilder.groupProjection(
-                outputs,
-                groupKeys,
-                aggregates,
-                AggregateMode.PARTIAL_FINAL,
-                RowGranularity.CLUSTER
-            );
-
-            // TODO: Would need rowAuthority information on source to be able to optimize like ReduceOnCollectorGroupByConsumer
-            // TODO: To decide if a re-distribution step is useful numExpectedRows/cardinality information would be great.
-
-            return new Merge(
-                plan,
-                new MergePhase(
-                    plannerContext.jobId(),
-                    plannerContext.nextExecutionPhaseId(),
-                    "mergeOnHandler",
-                    plan.resultDescription().nodeIds().size(),
-                    Collections.singletonList(plannerContext.handlerNode()),
-                    plan.resultDescription().streamOutputs(),
-                    Collections.singletonList(toFinal),
-                    DistributionInfo.DEFAULT_SAME_NODE,
-                    null
-                ),
-                NO_LIMIT,
-                0,
-                outputs.size(),
-                NO_LIMIT,
-                null
-            );
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            return this;
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return outputs;
         }
     }
 }
