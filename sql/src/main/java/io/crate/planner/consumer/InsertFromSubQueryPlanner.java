@@ -31,11 +31,14 @@ import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.exceptions.UnsupportedFeatureException;
 import io.crate.metadata.DocReferences;
+import io.crate.metadata.Functions;
 import io.crate.planner.Merge;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
+import io.crate.planner.operators.LogicalPlanner;
 import io.crate.planner.projection.ColumnIndexWriterProjection;
 import io.crate.planner.projection.MergeCountProjection;
+import io.crate.planner.projection.builder.ProjectionBuilder;
 import org.elasticsearch.common.settings.Settings;
 
 import java.util.List;
@@ -48,7 +51,7 @@ public final class InsertFromSubQueryPlanner {
     private InsertFromSubQueryPlanner() {
     }
 
-    public static Plan plan(InsertFromSubQueryAnalyzedStatement statement, ConsumerContext context) {
+    public static Plan plan(Functions functions, InsertFromSubQueryAnalyzedStatement statement, Planner.Context context) {
 
         final ColumnIndexWriterProjection indexWriterProjection = new ColumnIndexWriterProjection(
             statement.tableInfo().ident(),
@@ -75,14 +78,13 @@ public final class InsertFromSubQueryPlanner {
                                                   "supported on insert using a sub-query");
         }
         SOURCE_LOOKUP_CONVERTER.process(subRelation, null);
-        context.setFetchMode(FetchMode.NEVER);
-        Planner.Context plannerContext = context.plannerContext();
-        Plan plannedSubQuery = plannerContext.planSubRelation(subRelation, context);
+        LogicalPlanner logicalPlanner = new LogicalPlanner();
+        Plan plannedSubQuery = logicalPlanner.plan(subRelation, context, new ProjectionBuilder(functions));
         if (plannedSubQuery == null) {
             return null;
         }
         plannedSubQuery.addProjection(indexWriterProjection, null, null, null);
-        Plan plan = Merge.ensureOnHandler(plannedSubQuery, plannerContext);
+        Plan plan = Merge.ensureOnHandler(plannedSubQuery, context);
         if (plan == plannedSubQuery) {
             return plan;
         }

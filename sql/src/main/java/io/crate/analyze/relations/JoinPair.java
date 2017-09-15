@@ -73,9 +73,6 @@ public class JoinPair {
         return condition;
     }
 
-    public void condition(Symbol condition) {
-        this.condition = condition;
-    }
 
     @Override
     public String toString() {

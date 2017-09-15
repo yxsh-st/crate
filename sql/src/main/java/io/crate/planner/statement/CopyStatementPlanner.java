@@ -30,6 +30,7 @@ import io.crate.analyze.symbol.Literal;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
 import io.crate.metadata.ColumnIdent;
+import io.crate.metadata.Functions;
 import io.crate.metadata.GeneratedReference;
 import io.crate.metadata.PartitionName;
 import io.crate.metadata.Reference;
@@ -39,10 +40,9 @@ import io.crate.operation.projectors.TopN;
 import io.crate.planner.Merge;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
-import io.crate.planner.consumer.ConsumerContext;
-import io.crate.planner.consumer.FetchMode;
 import io.crate.planner.node.dql.Collect;
 import io.crate.planner.node.dql.FileUriCollectPhase;
+import io.crate.planner.operators.LogicalPlanner;
 import io.crate.planner.projection.MergeCountProjection;
 import io.crate.planner.projection.Projection;
 import io.crate.planner.projection.SourceIndexWriterProjection;
@@ -66,9 +66,11 @@ import java.util.stream.Collectors;
 public class CopyStatementPlanner {
 
     private final ClusterService clusterService;
+    private final Functions functions;
 
-    public CopyStatementPlanner(ClusterService clusterService) {
+    public CopyStatementPlanner(ClusterService clusterService, Functions functions) {
         this.clusterService = clusterService;
+        this.functions = functions;
     }
 
     public Plan planCopyFrom(CopyFromAnalyzedStatement copyFrom, Planner.Context context) {
@@ -235,9 +237,8 @@ public class CopyStatementPlanner {
             statement.outputNames(),
             outputFormat);
 
-        ConsumerContext consumerContext = new ConsumerContext(context);
-        consumerContext.setFetchMode(FetchMode.NEVER);
-        Plan plan = context.planSubRelation(statement.subQueryRelation(), consumerContext);
+        LogicalPlanner logicalPlanner = new LogicalPlanner();
+        Plan plan = logicalPlanner.plan(statement.subQueryRelation(), context, new ProjectionBuilder(functions));
         if (plan == null) {
             return null;
         }

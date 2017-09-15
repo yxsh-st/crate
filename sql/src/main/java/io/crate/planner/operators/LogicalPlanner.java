@@ -20,7 +20,7 @@
  * agreement.
  */
 
-package io.crate.planner.consumer;
+package io.crate.planner.operators;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
@@ -227,6 +227,9 @@ public class LogicalPlanner {
                           int limitHint,
                           int offset,
                           @Nullable OrderBy order) {
+
+            // TODO: How would we optimize this to produce a CountPlan?
+
             Plan plan = source.build(plannerContext, projectionBuilder, this.usedColumns, NO_LIMIT, 0, null);
 
             if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
@@ -919,6 +922,9 @@ public class LogicalPlanner {
         WrappedRelation(QueriedRelation relation) {
             this.relation = relation;
             SplitPoints splitPoints = SplitPoints.create(relation.querySpec());
+            // TODO: Might make more sense to use the "usedSymbols" functionality - so that a parent ORDER operator
+            // can indicate to the child that the orderBy symbols are used
+            // Though they're *always* used - so doing it like this might be simpler
             if (splitPoints.aggregates().isEmpty()) {
                 this.aggregates = Optional.empty();
                 Optional<OrderBy> orderBy = relation.querySpec().orderBy();
