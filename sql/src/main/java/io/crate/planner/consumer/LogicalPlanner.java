@@ -41,6 +41,7 @@ import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.relations.QuerySplitter;
 import io.crate.analyze.symbol.AggregateMode;
 import io.crate.analyze.symbol.Field;
+import io.crate.analyze.symbol.FieldReplacer;
 import io.crate.analyze.symbol.FieldsVisitor;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.InputColumn;
@@ -386,6 +387,11 @@ public class LogicalPlanner {
                         toCollect.addAll(usedColumns);
                     }
                 }
+                // workaround for dealing with fields from joins
+                java.util.function.Function<? super Symbol, ? extends Symbol> fieldsToRefs =
+                    FieldReplacer.bind(f -> rel.querySpec().outputs().get(f.index()));
+                List<Symbol> collectRefs = Lists2.copyAndReplace(toCollect, fieldsToRefs);
+
                 SessionContext sessionContext = plannerContext.transactionContext().sessionContext();
                 RoutedCollectPhase collectPhase = new RoutedCollectPhase(
                     plannerContext.jobId(),
@@ -397,7 +403,7 @@ public class LogicalPlanner {
                         null,
                         sessionContext),
                     tableInfo.rowGranularity(),
-                    toCollect,
+                    collectRefs,
                     Collections.emptyList(),
                     where,
                     DistributionInfo.DEFAULT_BROADCAST,
@@ -408,9 +414,9 @@ public class LogicalPlanner {
                     collectPhase,
                     limitHint,
                     offset,
-                    toCollect.size(),
+                    collectRefs.size(),
                     limitHint,
-                    PositionalOrderBy.of(order, toCollect)
+                    PositionalOrderBy.of(order, collectRefs)
                 );
                 if (fetchDescription == null) {
                     return collect;
@@ -836,7 +842,7 @@ public class LogicalPlanner {
         if (relation instanceof QueriedRelation) {
             QueriedRelation queriedRelation = (QueriedRelation) relation;
             QuerySpec qs = queriedRelation.querySpec();
-            return new Collect(queriedRelation, qs.outputs(), qs.where());
+            return new Collect(queriedRelation, new ArrayList<>(relation.fields()), qs.where());
         }
         throw new UnsupportedOperationException("relation must be a QueriedRelation to create a collect operator: " + relation);
     }
