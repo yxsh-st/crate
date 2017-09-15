@@ -26,14 +26,19 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import io.crate.action.sql.SessionContext;
 import io.crate.analyze.HavingClause;
+import io.crate.analyze.MultiSourceSelect;
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.QueriedTableRelation;
 import io.crate.analyze.QuerySpec;
 import io.crate.analyze.WhereClause;
+import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.AnalyzedRelationVisitor;
 import io.crate.analyze.relations.DocTableRelation;
+import io.crate.analyze.relations.JoinPair;
+import io.crate.analyze.relations.JoinPairs;
 import io.crate.analyze.relations.QueriedDocTable;
 import io.crate.analyze.relations.QueriedRelation;
+import io.crate.analyze.relations.QuerySplitter;
 import io.crate.analyze.symbol.AggregateMode;
 import io.crate.analyze.symbol.Field;
 import io.crate.analyze.symbol.FieldsVisitor;
@@ -57,6 +62,7 @@ import io.crate.planner.Plan;
 import io.crate.planner.Planner;
 import io.crate.planner.PositionalOrderBy;
 import io.crate.planner.ReaderAllocations;
+import io.crate.planner.ResultDescription;
 import io.crate.planner.distribution.DistributionInfo;
 import io.crate.planner.fetch.FetchRewriter;
 import io.crate.planner.node.ExecutionPhases;
@@ -64,6 +70,8 @@ import io.crate.planner.node.dql.MergePhase;
 import io.crate.planner.node.dql.PlanWithFetchDescription;
 import io.crate.planner.node.dql.QueryThenFetch;
 import io.crate.planner.node.dql.RoutedCollectPhase;
+import io.crate.planner.node.dql.join.NestedLoop;
+import io.crate.planner.node.dql.join.NestedLoopPhase;
 import io.crate.planner.node.fetch.FetchPhase;
 import io.crate.planner.node.fetch.FetchSource;
 import io.crate.planner.projection.AggregationProjection;
@@ -84,8 +92,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -145,6 +155,10 @@ public class LogicalPlanner {
         // TODO: not sure if required / useful
         LogicalPlan tryCollapse();
 
+        // TODO: Currently the outputs can change after build is invoked
+        // -> LogicalPlan can't be cached
+        // -> May be confusing
+        // -> To fix this the usedColumns would need to be propagated during the creation of the operators
         List<Symbol> outputs();
     }
 
@@ -165,7 +179,7 @@ public class LogicalPlanner {
 
     private LogicalPlan plan(QueriedRelation queriedRelation) {
         WrappedRelation relation = new WrappedRelation(queriedRelation);
-        LogicalPlan plan = new Collect(queriedRelation, relation.toCollect(), relation.where());
+        LogicalPlan plan = createDataSource(queriedRelation, relation.toCollect(), relation.where());
 
         if (relation.aggregates().isPresent() && !relation.groupKeys().isPresent()) {
             plan = new HashAggregate(plan, relation.aggregates().orElse(Collections.emptyList()));
@@ -510,6 +524,107 @@ public class LogicalPlanner {
         }
     }
 
+    private static class Join implements LogicalPlan {
+
+        private final LogicalPlan lhs;
+        private final LogicalPlan rhs;
+        private final JoinPair joinPair;
+        private final List<Symbol> outputs;
+
+        Join(LogicalPlan lhs, LogicalPlan rhs, JoinPair joinPair) {
+            this.lhs = lhs;
+            this.rhs = rhs;
+            this.joinPair = joinPair;
+            // TODO: lhs outputs / rhs outputs may contain Refs, and everything above a Join is using Fields
+            // this breaks everything
+            // -> to fix this we'd have to delay the Field->Reference normalization
+            // it Could be done within Collect - and only for the fields used in the CollectPhase
+            this.outputs = Lists2.concat(lhs.outputs(), rhs.outputs());
+        }
+
+        @Override
+        public Plan build(Planner.Context plannerContext,
+                          ProjectionBuilder projectionBuilder,
+                          Set<Symbol> usedColumns,
+                          int limitHint,
+                          int offset,
+                          @Nullable OrderBy order) {
+
+            // TODO: add columns from joinPair to usedColumns
+            // TODO: extractColumns is a workaround to prevent fetch for now
+            Plan left = lhs.build(plannerContext, projectionBuilder, extractColumns(lhs.outputs()), NO_LIMIT, 0, null);
+            Plan right = rhs.build(plannerContext, projectionBuilder, extractColumns(rhs.outputs()), NO_LIMIT, 0, null);
+
+            // TODO: distribution planning
+
+            List<String> nlExecutionNodes = Collections.singletonList(plannerContext.handlerNode());
+            NestedLoopPhase nlPhase = new NestedLoopPhase(
+                plannerContext.jobId(),
+                plannerContext.nextExecutionPhaseId(),
+                "nestedLoop",
+                // NestedLoopPhase ctor want's at least one projection
+                Collections.singletonList(new EvalProjection(InputColumn.fromSymbols(outputs))),
+                receiveResultFrom(plannerContext, left.resultDescription(), nlExecutionNodes),
+                receiveResultFrom(plannerContext, right.resultDescription(), nlExecutionNodes),
+                nlExecutionNodes,
+                joinPair.joinType(),
+                joinPair.condition(),
+                lhs.outputs().size(),
+                rhs.outputs().size()
+            );
+            return new NestedLoop(
+                nlPhase,
+                left,
+                right,
+                limitHint,
+                offset,
+                limitHint,
+                outputs.size(),
+                null
+            );
+        }
+
+        private static MergePhase receiveResultFrom(Planner.Context plannerContext,
+                                             ResultDescription resultDescription,
+                                             Collection<String> executionNodes) {
+            final List<Projection> projections;
+            if (hasUnAppliedLimit(resultDescription)) {
+                projections = Collections.singletonList(ProjectionBuilder.topNOrEvalIfNeeded(
+                    resultDescription.limit(),
+                    resultDescription.offset(),
+                    resultDescription.numOutputs(),
+                    resultDescription.streamOutputs()
+                ));
+            } else {
+                projections = Collections.emptyList();
+            }
+            return new MergePhase(
+                plannerContext.jobId(),
+                plannerContext.nextExecutionPhaseId(),
+                "nl-receive-source-result",
+                resultDescription.nodeIds().size(),
+                executionNodes,
+                resultDescription.streamOutputs(),
+                projections,
+                DistributionInfo.DEFAULT_SAME_NODE,
+                resultDescription.orderBy()
+            );
+        }
+
+        private static boolean hasUnAppliedLimit(ResultDescription resultDescription) {
+            return resultDescription.limit() != NO_LIMIT || resultDescription.offset() != 0;
+        }
+
+        @Override
+        public LogicalPlan tryCollapse() {
+            return this;
+        }
+
+        @Override
+        public List<Symbol> outputs() {
+            return outputs;
+        }
+    }
 
     private class Eval implements LogicalPlan {
 
@@ -717,6 +832,54 @@ public class LogicalPlanner {
         return columns;
     }
 
+    private static Collect createCollect(AnalyzedRelation relation) {
+        if (relation instanceof QueriedRelation) {
+            QueriedRelation queriedRelation = (QueriedRelation) relation;
+            QuerySpec qs = queriedRelation.querySpec();
+            return new Collect(queriedRelation, qs.outputs(), qs.where());
+        }
+        throw new UnsupportedOperationException("relation must be a QueriedRelation to create a collect operator: " + relation);
+    }
+
+    private static LogicalPlan createDataSource(QueriedRelation queriedRelation, List<Symbol> toCollect, WhereClause where) {
+        if (queriedRelation instanceof QueriedTableRelation) {
+            return new Collect(queriedRelation, toCollect, where);
+        }
+        if (queriedRelation instanceof MultiSourceSelect) {
+            MultiSourceSelect mss = (MultiSourceSelect) queriedRelation;
+            final Map<Set<QualifiedName>, Symbol> queryParts;
+            if (where.hasQuery()) {
+                queryParts = QuerySplitter.split(where.query());
+            } else {
+                queryParts = Collections.emptyMap();
+            }
+            // TODO: add relation-ordering-logic
+            Iterator<AnalyzedRelation> iterator = mss.sources().values().iterator();
+
+            AnalyzedRelation left = iterator.next();
+            AnalyzedRelation right = iterator.next();
+            LogicalPlan lhs = createCollect(left);
+            LogicalPlan rhs = createCollect(right);
+
+            JoinPair joinPair = JoinPairs.findAndRemovePair(
+                mss.joinPairs(), left.getQualifiedName(), right.getQualifiedName());
+
+            LogicalPlan plan = new Join(lhs, rhs, joinPair);
+            // TODO: add a Filter for query
+            HashSet<QualifiedName> relNames = Sets.newHashSet(left.getQualifiedName(), right.getQualifiedName());
+            Symbol query = queryParts.get(relNames);
+
+            while (iterator.hasNext()) {
+                right = iterator.next();
+                rhs = createCollect(right);
+                joinPair = JoinPairs.findAndRemovePair(mss.joinPairs(), left.getQualifiedName(), right.getQualifiedName());
+
+                plan = new Join(plan, rhs, joinPair);
+            }
+            return plan;
+        }
+        throw new UnsupportedOperationException("NYI: " + queriedRelation);
+    }
 
     interface NewQueriedRelation extends QueriedRelation {
 

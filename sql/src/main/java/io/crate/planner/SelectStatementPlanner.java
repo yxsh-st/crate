@@ -113,6 +113,13 @@ class SelectStatementPlanner {
 
         @Override
         public Plan visitMultiSourceSelect(MultiSourceSelect mss, Planner.Context context) {
+            if (true) {
+                LogicalPlanner logicalPlanner = new LogicalPlanner();
+                return Merge.ensureOnHandler(
+                    logicalPlanner.plan(mss, context, new ProjectionBuilder(functions)),
+                    context
+                );
+            }
             QuerySpec querySpec = mss.querySpec();
             context.applySoftLimit(querySpec);
             return invokeConsumingPlanner(mss, context);
