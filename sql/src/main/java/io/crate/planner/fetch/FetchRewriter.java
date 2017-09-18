@@ -112,15 +112,15 @@ public final class FetchRewriter {
           *
           * The order of the column matches the order they had in the selectList/querySpec
           */
-        final List<Symbol> postFetchOutputs;
+        public final List<Symbol> postFetchOutputs;
         private final Collection<Reference> fetchRefs;
 
-        private FetchDescription(TableIdent tableIdent,
-                                 List<Reference> partitionedByColumns,
-                                 Reference fetchId,
-                                 List<Symbol> preFetchOutputs,
-                                 List<Symbol> postFetchOutputs,
-                                 Collection<Reference> fetchRefs) {
+        public FetchDescription(TableIdent tableIdent,
+                                List<Reference> partitionedByColumns,
+                                Reference fetchId,
+                                List<Symbol> preFetchOutputs,
+                                List<Symbol> postFetchOutputs,
+                                Collection<Reference> fetchRefs) {
             this.tableIdent = tableIdent;
             this.partitionedByColumns = partitionedByColumns;
             this.fetchId = fetchId;
