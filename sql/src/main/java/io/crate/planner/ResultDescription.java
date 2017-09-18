@@ -92,6 +92,6 @@ public interface ResultDescription {
     }
 
     default boolean hasUnAppliedLimit() {
-        return limit() != TopN.NO_LIMIT || offset() != 0;
+        return limit() > TopN.NO_LIMIT || offset() != 0;
     }
 }

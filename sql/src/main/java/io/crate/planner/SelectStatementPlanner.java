@@ -29,6 +29,7 @@ import io.crate.analyze.SelectAnalyzedStatement;
 import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.AnalyzedRelationVisitor;
 import io.crate.analyze.relations.QueriedDocTable;
+import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.symbol.SelectSymbol;
 import io.crate.exceptions.VersionInvalidException;
 import io.crate.metadata.Functions;
@@ -64,6 +65,13 @@ class SelectStatementPlanner {
         private Plan invokeConsumingPlanner(AnalyzedRelation relation, Planner.Context context) {
             Plan plan = consumingPlanner.plan(relation, context);
             if (plan == null) {
+                if (relation instanceof QueriedRelation) {
+                    LogicalPlanner logicalPlanner = new LogicalPlanner();
+                    return Merge.ensureOnHandler(
+                        logicalPlanner.plan(((QueriedRelation) relation), context, new ProjectionBuilder(functions)),
+                        context
+                    );
+                }
                 throw new UnsupportedOperationException("Cannot create plan for: " + relation);
             }
             return Merge.ensureOnHandler(plan, context);
@@ -85,13 +93,6 @@ class SelectStatementPlanner {
             QuerySpec querySpec = table.querySpec();
             context.applySoftLimit(querySpec);
             if (querySpec.hasAggregates() || (!querySpec.groupBy().isEmpty())) {
-                if (table.groupBy().isEmpty()) {
-                    LogicalPlanner logicalPlanner = new LogicalPlanner();
-                    return Merge.ensureOnHandler(
-                        logicalPlanner.plan(table, context, new ProjectionBuilder(functions)),
-                        context
-                    );
-                }
                 return invokeConsumingPlanner(table, context);
             }
             if (querySpec.where().docKeys().isPresent() && !table.tableRelation().tableInfo().isAlias()) {

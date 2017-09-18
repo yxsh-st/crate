@@ -118,11 +118,7 @@ class Collect implements LogicalPlan {
             plannerContext.jobId(),
             plannerContext.nextExecutionPhaseId(),
             "collect",
-            plannerContext.allocateRouting(
-                tableInfo,
-                where,
-                null,
-                sessionContext),
+            plannerContext.allocateRouting(tableInfo, where, null, sessionContext),
             tableInfo.rowGranularity(),
             collectRefs,
             Collections.emptyList(),

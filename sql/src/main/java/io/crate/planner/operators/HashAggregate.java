@@ -31,6 +31,7 @@ import io.crate.analyze.symbol.format.SymbolFormatter;
 import io.crate.metadata.FunctionInfo;
 import io.crate.metadata.Reference;
 import io.crate.metadata.RowGranularity;
+import io.crate.metadata.doc.DocTableInfo;
 import io.crate.operation.aggregation.impl.CountAggregation;
 import io.crate.planner.Merge;
 import io.crate.planner.Plan;
@@ -79,12 +80,11 @@ public class HashAggregate implements LogicalPlan {
             plan.addProjection(fullAggregation, null, null, null);
             return plan;
         }
-
         AggregationProjection toPartial = projectionBuilder.aggregationProjection(
             source.outputs(),
             aggregates,
             AggregateMode.ITER_PARTIAL,
-            RowGranularity.SHARD
+            RowGranularity.CLUSTER
         );
         plan.addProjection(toPartial, null, null, null);
 
@@ -119,6 +119,7 @@ public class HashAggregate implements LogicalPlan {
     public LogicalPlan tryCollapse() {
         LogicalPlan collapsed = source.tryCollapse();
         if (collapsed instanceof Collect &&
+            ((Collect) collapsed).tableInfo instanceof DocTableInfo &&
             aggregates.size() == 1 &&
             aggregates.get(0).info().equals(CountAggregation.COUNT_STAR_FUNCTION)) {
 
