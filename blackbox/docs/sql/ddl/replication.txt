@@ -21,9 +21,26 @@ to zero to allow fast write operations with the default setting of
 Data Health Status
 ==================
 
-The `Admin UI`_ has a data health status indicator:
+The `Admin UI`_ indicates the health of your data:
 
-...
+====== ====== =================================================================
+Color  Status Meaning
+====== ====== =================================================================
+Green  Good   All of the following conditions are met:
+
+              - All records are replicated
+              - Shards are optimally distributed across the available nodes
+              - something about availability??
+------ ------ -----------------------------------------------------------------
+Yellow ??     One or more of the following is true:
+
+              - There are records that need replicating
+              - One or more replica shards that are located on the same node as
+                the primary shard
+              - something about availability??
+------ ------ -----------------------------------------------------------------
+Red    ??     unavailable??
+====== ====== =================================================================
 
 Configuration
 =============
