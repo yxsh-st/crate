@@ -28,17 +28,14 @@ import io.crate.action.sql.SessionContext;
 import io.crate.analyze.HavingClause;
 import io.crate.analyze.MultiSourceSelect;
 import io.crate.analyze.OrderBy;
+import io.crate.analyze.QueriedSelectRelation;
 import io.crate.analyze.QueriedTableRelation;
+import io.crate.analyze.QueryClause;
 import io.crate.analyze.QuerySpec;
 import io.crate.analyze.WhereClause;
-import io.crate.analyze.relations.AnalyzedRelation;
 import io.crate.analyze.relations.AnalyzedRelationVisitor;
-import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.relations.JoinPair;
-import io.crate.analyze.relations.JoinPairs;
-import io.crate.analyze.relations.QueriedDocTable;
 import io.crate.analyze.relations.QueriedRelation;
-import io.crate.analyze.relations.QuerySplitter;
 import io.crate.analyze.symbol.AggregateMode;
 import io.crate.analyze.symbol.Field;
 import io.crate.analyze.symbol.FieldReplacer;
@@ -51,8 +48,8 @@ import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.symbol.Symbols;
 import io.crate.collections.Lists2;
 import io.crate.exceptions.ColumnUnknownException;
-import io.crate.metadata.DocReferences;
 import io.crate.metadata.Path;
+import io.crate.metadata.Reference;
 import io.crate.metadata.RowGranularity;
 import io.crate.metadata.doc.DocSysColumns;
 import io.crate.metadata.doc.DocTableInfo;
@@ -92,11 +89,8 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -111,7 +105,7 @@ public class LogicalPlanner {
      * LogicalPlan is a tree of "Operators"
      * This is a representation of the logical order of operators that need to be executed to produce a correct result.
      *
-     * {@link #build(Planner.Context, ProjectionBuilder, Set, int, int, OrderBy)} is used to create the
+     * {@link #build(Planner.Context, ProjectionBuilder, int, int, OrderBy)} is used to create the
      * actual "physical" execution plan.
      *
      * A Operator is something like Limit, OrderBy, HashAggregate, Join, Union, Collect
@@ -125,7 +119,7 @@ public class LogicalPlanner {
      *     Collect [x, y, z]
      * </pre>
      *
-     * {@link #build(Planner.Context, ProjectionBuilder, Set, int, int, OrderBy)} is called on the "root" and flows down.
+     * {@link #build(Planner.Context, ProjectionBuilder, int, int, OrderBy)} is called on the "root" and flows down.
      * Each time each operator may provide "hints" to the children so that they can decide to eagerly apply parts of the
      * operations
      *
@@ -145,92 +139,179 @@ public class LogicalPlanner {
      */
     public interface LogicalPlan {
 
-        // TODO: describe usedColumns/limit/offset/orderBy
+        interface Builder {
+
+            /**
+             * Create a LogicalPlan node
+             *
+             * @param usedColumns The columns the "parent" is using.
+             *                    This is used to create plans which utilize query-then-fetch.
+             *                    For example:
+             *                    <pre>
+             *                       select a, b, c from t1 order by a limit 10
+             *
+             *                       EvalFetch (usedColumns: [a, b, c])
+             *                         outputs: [a, b, c]   (b, c resolved using _fetch)
+             *                         |
+             *                       Limit 10 (usedColumns: [])
+             *                         |
+             *                       Order (usedColumns: [a]
+             *                         |
+             *                       Collect (usedColumns: [a] - inherited from Order)
+             *                         outputs: [_fetch, a]
+             *                    </pre>
+             */
+            LogicalPlan build(Set<Symbol> usedColumns);
+        }
+
+        // TODO: describe limit/offset/orderBy
         Plan build(Planner.Context plannerContext,
                    ProjectionBuilder projectionBuilder,
-                   Set<Symbol> usedColumns,
                    int limitHint,
                    int offset,
                    @Nullable OrderBy order);
 
-        // TODO: not sure if required / useful
+        /**
+         * Used to generate optimized operators.
+         * E.g. Aggregate(count(*)) + Collect -> Count
+         */
         LogicalPlan tryCollapse();
 
-        // TODO: Currently the outputs can change after build is invoked
-        // -> LogicalPlan can't be cached
-        // -> May be confusing
-        // -> To fix this the usedColumns would need to be propagated during the creation of the operators
         List<Symbol> outputs();
     }
 
     public Plan plan(QueriedRelation queriedRelation,
                      Planner.Context plannerContext,
                      ProjectionBuilder projectionBuilder) {
-        LogicalPlanner.LogicalPlan logicalPlan = plan(queriedRelation).tryCollapse();
+        LogicalPlanner.LogicalPlan logicalPlan = plan(queriedRelation)
+            .build(extractColumns(queriedRelation.querySpec().outputs()))
+            .tryCollapse();
 
         return logicalPlan.build(
             plannerContext,
             projectionBuilder,
-            Collections.emptySet(),
             LogicalPlanner.NO_LIMIT,
             0,
             null
         );
     }
 
-    private LogicalPlan plan(QueriedRelation queriedRelation) {
+    private LogicalPlan.Builder plan(QueriedRelation queriedRelation) {
         WrappedRelation relation = new WrappedRelation(queriedRelation);
-        LogicalPlan plan = createDataSource(queriedRelation, relation.toCollect(), relation.where());
-
-        if (relation.aggregates().isPresent() && !relation.groupKeys().isPresent()) {
-            plan = new HashAggregate(plan, relation.aggregates().orElse(Collections.emptyList()));
-        } else if (relation.groupKeys().isPresent()) {
-            plan = new GroupHashAggregate(
-                plan,
-                relation.aggregates().orElse(Collections.emptyList()),
-                relation.groupKeys().get());
-        }
-        if (relation.having().isPresent()) {
-            plan = new Filter(plan, relation.having().get());
-        }
-        if (relation.orderBy().isPresent()) {
-            plan = new Order(plan, relation.orderBy().get());
-        }
-        if (relation.limit().isPresent()) {
-            plan = new Limit(plan, relation.limit().get(), relation.offset().orElse(Literal.of(0L)));
-        }
-        // TODO: maybe merge Fetch and Eval
-        // or do the fetch-planning before build is called, so that it's possible to figure out if fetch is used here
-        plan = new Fetch(plan, relation.outputs());
-        if (!plan.outputs().equals(relation.outputs())) {
-            plan = new Eval(plan, relation.outputs());
-        }
-        return plan;
+        return fetchOrEval(
+            limit(
+                orderBy(
+                    filter(
+                        groupByOrAggregate(
+                            whereAndCollect(queriedRelation, relation.toCollect(), relation.where()),
+                            relation.groupKeys(),
+                            relation.aggregates()
+                        ),
+                        relation.having()
+                    ),
+                    relation.orderBy()
+                ),
+                relation.limit(),
+                relation.offset()
+            ),
+            relation.querySpec().outputs()
+        );
     }
 
-    private class HashAggregate implements LogicalPlan {
+    private static LogicalPlan.Builder fetchOrEval(LogicalPlan.Builder source, List<Symbol> outputs) {
+        return usedColumns -> new FetchOrEval(source.build(Collections.emptySet()), usedColumns, outputs);
+    }
+
+    private static LogicalPlan.Builder limit(LogicalPlan.Builder source, Optional<Symbol> limit, Optional<Symbol> offset) {
+        if (!limit.isPresent()) {
+            return source;
+        }
+        return usedColumns -> new Limit(source.build(usedColumns), limit.get(), offset.orElse(Literal.of(0L)));
+    }
+
+    private static LogicalPlan.Builder orderBy(LogicalPlan.Builder source, @Nullable OrderBy orderBy) {
+        if (orderBy == null) {
+            return source;
+        }
+        Set<Symbol> columnsInOrderBy = extractColumns(orderBy.orderBySymbols());
+        return usedColumns -> {
+            columnsInOrderBy.addAll(usedColumns);
+            return new Order(source.build(columnsInOrderBy), orderBy);
+        };
+    }
+
+    private static LogicalPlan.Builder groupByOrAggregate(LogicalPlan.Builder source, List<Symbol> groupKeys, List<Function> aggregates) {
+        if (!groupKeys.isEmpty()) {
+            return usedColumns -> new GroupHashAggregate(
+                source.build(extractColumns(Lists2.concat(groupKeys, aggregates))),
+                aggregates,
+                groupKeys
+            );
+        }
+        if (!aggregates.isEmpty()) {
+            return usedColumns -> new HashAggregate(source.build(extractColumns(aggregates)), aggregates);
+        }
+        return source;
+    }
+
+    private LogicalPlan.Builder whereAndCollect(QueriedRelation queriedRelation, List<Symbol> toCollect, WhereClause where) {
+        if (queriedRelation instanceof QueriedSelectRelation) {
+            QueriedSelectRelation selectRelation = (QueriedSelectRelation) queriedRelation;
+            return filter(plan(selectRelation.subRelation()), where);
+        }
+        if (queriedRelation instanceof MultiSourceSelect) {
+            return createJoinNodes(((MultiSourceSelect) queriedRelation), where);
+        }
+        if (queriedRelation instanceof QueriedTableRelation) {
+            return createCollect((QueriedTableRelation) queriedRelation, toCollect, where);
+        }
+        throw new UnsupportedOperationException("Cannot create LogicalPlan from: " + queriedRelation);
+    }
+
+    private LogicalPlan.Builder createCollect(QueriedTableRelation relation, List<Symbol> toCollect, WhereClause where) {
+        return usedColumns -> new Collect(relation, toCollect, where, usedColumns);
+    }
+
+    private LogicalPlan.Builder createJoinNodes(MultiSourceSelect mss, WhereClause where) {
+        throw new UnsupportedOperationException("NYI createJoinNodes");
+    }
+
+    private LogicalPlan.Builder filter(LogicalPlan.Builder sourceBuilder, @Nullable QueryClause queryClause) {
+        if (queryClause == null) {
+            return sourceBuilder;
+        }
+        if (queryClause.hasQuery()) {
+            Set<Symbol> columnsInQuery = extractColumns(queryClause.query());
+            return usedColumns -> {
+                columnsInQuery.addAll(usedColumns);
+                return new Filter(sourceBuilder.build(columnsInQuery), queryClause);
+            };
+        }
+        if (queryClause.noMatch()) {
+            return usedColumns -> new Filter(sourceBuilder.build(usedColumns), WhereClause.NO_MATCH);
+        }
+        return sourceBuilder;
+    }
+
+    private static class HashAggregate implements LogicalPlan {
 
         private final LogicalPlan source;
         private final List<Function> aggregates;
-        private final Set<Symbol> usedColumns;
 
         HashAggregate(LogicalPlan source, List<Function> aggregates) {
             this.source = source;
             this.aggregates = aggregates;
-            this.usedColumns = extractColumns(aggregates);
         }
 
         @Override
         public Plan build(Planner.Context plannerContext,
                           ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
                           int limitHint,
                           int offset,
                           @Nullable OrderBy order) {
 
-            // TODO: How would we optimize this to produce a CountPlan?
 
-            Plan plan = source.build(plannerContext, projectionBuilder, this.usedColumns, NO_LIMIT, 0, null);
+            Plan plan = source.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
 
             if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
                 AggregationProjection fullAggregation = projectionBuilder.aggregationProjection(
@@ -297,25 +378,19 @@ public class LogicalPlanner {
 
         private final LogicalPlan source;
         private final OrderBy orderBy;
-        private final Set<Symbol> usedColumns;
 
         Order(LogicalPlan source, OrderBy orderBy) {
             this.source = source;
             this.orderBy = orderBy;
-            this.usedColumns = extractColumns(orderBy.orderBySymbols());
         }
 
         @Override
         public Plan build(Planner.Context plannerContext,
                           ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
                           int limitHint,
                           int offset,
                           OrderBy order) {
-            HashSet<Symbol> allUsedColumns = new HashSet<>(this.usedColumns);
-            allUsedColumns.addAll(usedColumns);
-
-            Plan plan = source.build(plannerContext, projectionBuilder, allUsedColumns, limitHint, offset, orderBy);
+            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, orderBy);
             if (plan.resultDescription().orderBy() == null) {
                 Projection projection = ProjectionBuilder.topNOrEval(
                     source.outputs(),
@@ -349,84 +424,94 @@ public class LogicalPlanner {
         private final QueriedRelation relation;
         private final WhereClause where;
 
-        private List<Symbol> toCollect;
+        private final List<Symbol> toCollect;
+        private final FetchRewriter.FetchDescription fetchDescription;
+        private final TableInfo tableInfo;
 
-        Collect(QueriedRelation relation, List<Symbol> toCollect, WhereClause where) {
+        Collect(QueriedTableRelation relation, List<Symbol> toCollect, WhereClause where, Set<Symbol> usedColumns) {
             this.relation = relation;
-            this.toCollect = toCollect;
             this.where = where;
+            this.tableInfo = relation.tableRelation().tableInfo();
+
+            // TODO: extract/rework this
+            if (tableInfo instanceof DocTableInfo) {
+                DocTableInfo docTableInfo = (DocTableInfo) this.tableInfo;
+                Set<Symbol> columnsToCollect = extractColumns(toCollect);
+                Sets.SetView<Symbol> unusedColumns = Sets.difference(columnsToCollect, usedColumns);
+                ArrayList<Symbol> fetchable = new ArrayList<>();
+                ArrayList<Reference> fetchRefs = new ArrayList<>();
+                for (Symbol unusedColumn : unusedColumns) {
+                    if (!Symbols.containsColumn(unusedColumn, DocSysColumns.SCORE)) {
+                        fetchable.add(unusedColumn);
+                    }
+                    RefVisitor.visitRefs(unusedColumn, fetchRefs::add);
+                }
+                if (!fetchable.isEmpty()) {
+                    Reference fetchIdRef = DocSysColumns.forTable(docTableInfo.ident(), DocSysColumns.FETCHID);
+                    ArrayList<Symbol> preFetchSymbols = new ArrayList<>();
+                    preFetchSymbols.add(fetchIdRef);
+                    preFetchSymbols.addAll(usedColumns);
+                    fetchDescription = new FetchRewriter.FetchDescription(
+                        docTableInfo.ident(),
+                        docTableInfo.partitionedByColumns(),
+                        fetchIdRef,
+                        preFetchSymbols,
+                        toCollect,
+                        fetchRefs
+                    );
+                    this.toCollect = preFetchSymbols;
+                } else {
+                    this.fetchDescription = null;
+                    this.toCollect = toCollect;
+                }
+            } else {
+                this.fetchDescription = null;
+                this.toCollect = toCollect;
+            }
         }
 
         @Override
         public Plan build(Planner.Context plannerContext,
                           ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
                           int limitHint,
                           int offset,
                           @Nullable OrderBy order) {
-            FetchRewriter.FetchDescription fetchDescription = null;
-            // TODO: dispatch using a visitor
-            if (relation instanceof QueriedTableRelation) {
-                QueriedTableRelation rel = (QueriedTableRelation) this.relation;
-                TableInfo tableInfo = rel.tableRelation().tableInfo();
+            QueriedTableRelation rel = (QueriedTableRelation) this.relation;
+            // workaround for dealing with fields from joins
+            java.util.function.Function<? super Symbol, ? extends Symbol> fieldsToRefs =
+                FieldReplacer.bind(f -> rel.querySpec().outputs().get(f.index()));
+            List<Symbol> collectRefs = Lists2.copyAndReplace(toCollect, fieldsToRefs);
 
-                // TODO: extract/rework this
-                if (tableInfo instanceof DocTableInfo) {
-                    Set<Symbol> columnsToCollect = extractColumns(toCollect);
-                    Sets.SetView<Symbol> unusedColumns = Sets.difference(columnsToCollect, usedColumns);
-                    ArrayList<Symbol> fetchable = new ArrayList<>();
-                    for (Symbol unusedColumn : unusedColumns) {
-                        if (!Symbols.containsColumn(unusedColumn, DocSysColumns.SCORE)) {
-                            fetchable.add(unusedColumn);
-                        }
-                    }
-                    if (!fetchable.isEmpty()) {
-                        QuerySpec qs = new QuerySpec();
-                        qs.outputs(new ArrayList<>(unusedColumns));
-                        fetchDescription = FetchRewriter.rewrite(new QueriedDocTable(((DocTableRelation) rel.tableRelation()), qs));
-
-                        toCollect = new ArrayList<>(usedColumns.size() + 1);
-                        toCollect.addAll(fetchDescription.preFetchOutputs());
-                        toCollect.addAll(usedColumns);
-                    }
-                }
-                // workaround for dealing with fields from joins
-                java.util.function.Function<? super Symbol, ? extends Symbol> fieldsToRefs =
-                    FieldReplacer.bind(f -> rel.querySpec().outputs().get(f.index()));
-                List<Symbol> collectRefs = Lists2.copyAndReplace(toCollect, fieldsToRefs);
-
-                SessionContext sessionContext = plannerContext.transactionContext().sessionContext();
-                RoutedCollectPhase collectPhase = new RoutedCollectPhase(
-                    plannerContext.jobId(),
-                    plannerContext.nextExecutionPhaseId(),
-                    "collect",
-                    plannerContext.allocateRouting(
-                        tableInfo,
-                        where,
-                        null,
-                        sessionContext),
-                    tableInfo.rowGranularity(),
-                    collectRefs,
-                    Collections.emptyList(),
+            SessionContext sessionContext = plannerContext.transactionContext().sessionContext();
+            RoutedCollectPhase collectPhase = new RoutedCollectPhase(
+                plannerContext.jobId(),
+                plannerContext.nextExecutionPhaseId(),
+                "collect",
+                plannerContext.allocateRouting(
+                    tableInfo,
                     where,
-                    DistributionInfo.DEFAULT_BROADCAST,
-                    sessionContext.user()
-                );
-                collectPhase.orderBy(order);
-                io.crate.planner.node.dql.Collect collect = new io.crate.planner.node.dql.Collect(
-                    collectPhase,
-                    limitHint,
-                    offset,
-                    collectRefs.size(),
-                    limitHint,
-                    PositionalOrderBy.of(order, collectRefs)
-                );
-                if (fetchDescription == null) {
-                    return collect;
-                }
-                return new PlanWithFetchDescription(collect, fetchDescription);
+                    null,
+                    sessionContext),
+                tableInfo.rowGranularity(),
+                collectRefs,
+                Collections.emptyList(),
+                where,
+                DistributionInfo.DEFAULT_BROADCAST,
+                sessionContext.user()
+            );
+            collectPhase.orderBy(order);
+            io.crate.planner.node.dql.Collect collect = new io.crate.planner.node.dql.Collect(
+                collectPhase,
+                limitHint,
+                offset,
+                collectRefs.size(),
+                limitHint,
+                PositionalOrderBy.of(order, collectRefs)
+            );
+            if (fetchDescription == null) {
+                return collect;
             }
-            throw new UnsupportedOperationException("NYI");
+            return new PlanWithFetchDescription(collect, fetchDescription);
         }
 
         @Override
@@ -440,30 +525,24 @@ public class LogicalPlanner {
         }
     }
 
-    private class Filter implements LogicalPlan {
+    private static class Filter implements LogicalPlan {
 
         private final LogicalPlan source;
-        private final HavingClause havingClause;
-        private final Set<Symbol> usedColumns;
+        private final QueryClause queryClause;
 
-        Filter(LogicalPlan source, HavingClause havingClause) {
+        Filter(LogicalPlan source, QueryClause queryClause) {
             this.source = source;
-            this.havingClause = havingClause;
-            this.usedColumns = extractColumns(Collections.singletonList(havingClause.query()));
+            this.queryClause = queryClause;
         }
 
         @Override
         public Plan build(Planner.Context plannerContext,
                           ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
                           int limitHint,
                           int offset,
                           OrderBy order) {
-            HashSet<Symbol> allUsedColumns = new HashSet<>(this.usedColumns);
-            allUsedColumns.addAll(usedColumns);
-
-            Plan plan = source.build(plannerContext, projectionBuilder, allUsedColumns, limitHint, offset, order);
-            FilterProjection filterProjection = ProjectionBuilder.filterProjection(source.outputs(), havingClause);
+            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, order);
+            FilterProjection filterProjection = ProjectionBuilder.filterProjection(source.outputs(), queryClause);
             filterProjection.requiredGranularity(RowGranularity.SHARD);
             plan.addProjection(filterProjection, null, null, null);
             return plan;
@@ -480,7 +559,7 @@ public class LogicalPlanner {
         }
     }
 
-    private class Limit implements LogicalPlan {
+    private static class Limit implements LogicalPlan {
 
         private final LogicalPlan source;
         private final Symbol limit;
@@ -495,14 +574,13 @@ public class LogicalPlanner {
         @Override
         public Plan build(Planner.Context plannerContext,
                           ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
                           int limitHint,
                           int offsetHint,
                           @Nullable OrderBy order) {
             int limit = firstNonNull(plannerContext.toInteger(this.limit), NO_LIMIT);
             int offset = firstNonNull(plannerContext.toInteger(this.offset), 0);
 
-            Plan plan = source.build(plannerContext, projectionBuilder, usedColumns, limit + offset, 0, order);
+            Plan plan = source.build(plannerContext, projectionBuilder, limit + offset, 0, order);
             List<Symbol> inputCols = InputColumn.fromSymbols(source.outputs());
             if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
                 plan.addProjection(new TopNProjection(limit, offset, inputCols), null, null, null);
@@ -515,12 +593,6 @@ public class LogicalPlanner {
         @Override
         public LogicalPlan tryCollapse() {
             LogicalPlan collapsed = source.tryCollapse();
-            /*
-            if (collapsed instanceof Order) {
-                Order order = (Order) collapsed;
-                return new TopN(order.source, order.orderBy, limit, offset).tryCollapse();
-            }
-            */
             if (collapsed == source) {
                 return this;
             }
@@ -554,15 +626,14 @@ public class LogicalPlanner {
         @Override
         public Plan build(Planner.Context plannerContext,
                           ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
                           int limitHint,
                           int offset,
                           @Nullable OrderBy order) {
 
             // TODO: add columns from joinPair to usedColumns
             // TODO: extractColumns is a workaround to prevent fetch for now
-            Plan left = lhs.build(plannerContext, projectionBuilder, extractColumns(lhs.outputs()), NO_LIMIT, 0, null);
-            Plan right = rhs.build(plannerContext, projectionBuilder, extractColumns(rhs.outputs()), NO_LIMIT, 0, null);
+            Plan left = lhs.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
+            Plan right = rhs.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
 
             // TODO: distribution planning
 
@@ -635,70 +706,28 @@ public class LogicalPlanner {
         }
     }
 
-    private class Eval implements LogicalPlan {
-
-        private final LogicalPlan source;
-        private final List<Symbol> outputs;
-        private final Set<Symbol> usedColumns;
-
-        Eval(LogicalPlan source, List<Symbol> outputs) {
-            this.source = source;
-            this.outputs = outputs;
-            this.usedColumns = extractColumns(outputs);
-        }
-
-        @Override
-        public Plan build(Planner.Context plannerContext,
-                          ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
-                          int limitHint,
-                          int offset,
-                          @Nullable OrderBy order) {
-            HashSet<Symbol> allUsedColumns = new HashSet<>(this.usedColumns);
-            allUsedColumns.addAll(usedColumns);
-
-            Plan plan = source.build(plannerContext, projectionBuilder, allUsedColumns, limitHint, offset, order);
-            InputColumns.Context ctx = new InputColumns.Context(source.outputs());
-            plan.addProjection(new EvalProjection(InputColumns.create(outputs, ctx)), null, null, null);
-            return plan;
-        }
-
-        @Override
-        public LogicalPlan tryCollapse() {
-            return this;
-        }
-
-        @Override
-        public List<Symbol> outputs() {
-            return outputs;
-        }
-    }
-
-    private class GroupHashAggregate implements LogicalPlan {
+    private static class GroupHashAggregate implements LogicalPlan {
 
         private final LogicalPlan source;
         private final List<Function> aggregates;
         private final List<Symbol> groupKeys;
         private final List<Symbol> outputs;
-        private final Set<Symbol> usedColumns;
 
         GroupHashAggregate(LogicalPlan source, List<Function> aggregates, List<Symbol> groupKeys) {
             this.source = source;
             this.aggregates = aggregates;
             this.groupKeys = groupKeys;
             this.outputs = Lists2.concat(groupKeys, aggregates);
-            this.usedColumns = extractColumns(outputs);
         }
 
         @Override
         public Plan build(Planner.Context plannerContext,
                           ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
                           int limitHint,
                           int offset,
                           @Nullable OrderBy order) {
 
-            Plan plan = source.build(plannerContext, projectionBuilder, this.usedColumns, NO_LIMIT, 0, null);
+            Plan plan = source.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null);
             if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
                 GroupProjection groupProjection = projectionBuilder.groupProjection(
                     source.outputs(),
@@ -762,12 +791,12 @@ public class LogicalPlanner {
         }
     }
 
-    private class Fetch implements LogicalPlan {
+    private static class FetchOrEval implements LogicalPlan {
 
         private final LogicalPlan source;
         private final List<Symbol> outputs;
 
-        Fetch(LogicalPlan source, List<Symbol> outputs) {
+        FetchOrEval(LogicalPlan source, Set<Symbol> usedColumns, List<Symbol> outputs) {
             this.source = source;
             this.outputs = outputs;
         }
@@ -775,11 +804,13 @@ public class LogicalPlanner {
         @Override
         public Plan build(Planner.Context plannerContext,
                           ProjectionBuilder projectionBuilder,
-                          Set<Symbol> usedColumns,
                           int limitHint,
                           int offset,
                           @Nullable OrderBy order) {
-            Plan plan = source.build(plannerContext, projectionBuilder, Collections.emptySet(), limitHint, offset, order);
+
+            // TODO: make use of usedColumns to propagate fetch if the parent doesn't use the columns
+
+            Plan plan = source.build(plannerContext, projectionBuilder, limitHint, offset, order);
             FetchRewriter.FetchDescription fetchDescription = plan.resultDescription().fetchDescription();
             if (fetchDescription == null) {
                 InputColumns.Context ctx = new InputColumns.Context(source.outputs());
@@ -816,7 +847,7 @@ public class LogicalPlanner {
             );
             plan.addProjection(fetchProjection, null, null, null);
             InputColumns.Context ctx = new InputColumns.Context(fetchDescription.postFetchOutputs);
-            List<Symbol> inputCols = InputColumns.create(Lists2.copyAndReplace(outputs, DocReferences::toSourceLookup), ctx);
+            List<Symbol> inputCols = InputColumns.create(outputs, ctx);
             plan.addProjection(new EvalProjection(inputCols), null, null, null);
             return new QueryThenFetch(plan, fetchPhase);
         }
@@ -832,6 +863,13 @@ public class LogicalPlanner {
         }
     }
 
+    private static Set<Symbol> extractColumns(Symbol symbol) {
+        LinkedHashSet<Symbol> columns = new LinkedHashSet<>();
+        RefVisitor.visitRefs(symbol, columns::add);
+        FieldsVisitor.visitFields(symbol, columns::add);
+        return columns;
+    }
+
     private static Set<Symbol> extractColumns(Collection<? extends Symbol> symbols) {
         LinkedHashSet<Symbol> columns = new LinkedHashSet<>();
         for (Symbol symbol : symbols) {
@@ -841,13 +879,9 @@ public class LogicalPlanner {
         return columns;
     }
 
-    private static Collect createCollect(AnalyzedRelation relation) {
-        if (relation instanceof QueriedRelation) {
-            QueriedRelation queriedRelation = (QueriedRelation) relation;
-            QuerySpec qs = queriedRelation.querySpec();
-            return new Collect(queriedRelation, new ArrayList<>(relation.fields()), qs.where());
-        }
-        throw new UnsupportedOperationException("relation must be a QueriedRelation to create a collect operator: " + relation);
+    /*
+    private static Collect createCollect(QueriedTableRelation relation, WhereClause where) {
+        return new Collect(relation, where);
     }
 
     private static LogicalPlan createDataSource(QueriedRelation queriedRelation, List<Symbol> toCollect, WhereClause where) {
@@ -889,6 +923,7 @@ public class LogicalPlanner {
         }
         throw new UnsupportedOperationException("NYI: " + queriedRelation);
     }
+    */
 
     interface NewQueriedRelation extends QueriedRelation {
 
@@ -896,11 +931,13 @@ public class LogicalPlanner {
 
         WhereClause where();
 
-        Optional<List<Symbol>> groupKeys();
+        List<Symbol> groupKeys();
 
-        Optional<HavingClause> having();
+        @Nullable
+        HavingClause having();
 
-        Optional<OrderBy> orderBy();
+        @Nullable
+        OrderBy orderBy();
 
         Optional<Symbol> limit();
 
@@ -908,7 +945,7 @@ public class LogicalPlanner {
 
 
 
-        Optional<List<Function>> aggregates();
+        List<Function> aggregates();
 
         List<Symbol> toCollect();
     }
@@ -916,7 +953,7 @@ public class LogicalPlanner {
     static class WrappedRelation implements NewQueriedRelation {
 
         private final QueriedRelation relation;
-        private final Optional<List<Function>> aggregates;
+        private final List<Function> aggregates;
         private final List<Symbol> toCollect;
 
         WrappedRelation(QueriedRelation relation) {
@@ -926,7 +963,7 @@ public class LogicalPlanner {
             // can indicate to the child that the orderBy symbols are used
             // Though they're *always* used - so doing it like this might be simpler
             if (splitPoints.aggregates().isEmpty()) {
-                this.aggregates = Optional.empty();
+                this.aggregates = Collections.emptyList();
                 Optional<OrderBy> orderBy = relation.querySpec().orderBy();
                 if (orderBy.isPresent() && !relation.querySpec().groupBy().isPresent()) {
                     this.toCollect = Lists2.concatUnique(splitPoints.toCollect(), orderBy.get().orderBySymbols());
@@ -934,8 +971,7 @@ public class LogicalPlanner {
                     this.toCollect = splitPoints.toCollect();
                 }
             } else {
-                List<io.crate.analyze.symbol.Function> aggregates = splitPoints.aggregates();
-                this.aggregates = Optional.of(aggregates);
+                this.aggregates = splitPoints.aggregates();
                 this.toCollect = splitPoints.toCollect();
             }
         }
@@ -951,18 +987,18 @@ public class LogicalPlanner {
         }
 
         @Override
-        public Optional<List<Symbol>> groupKeys() {
-            return relation.querySpec().groupBy();
+        public List<Symbol> groupKeys() {
+            return relation.querySpec().groupBy().orElse(Collections.emptyList());
         }
 
         @Override
-        public Optional<HavingClause> having() {
-            return relation.querySpec().having();
+        public HavingClause having() {
+            return relation.querySpec().having().orElse(null);
         }
 
         @Override
-        public Optional<OrderBy> orderBy() {
-            return relation.querySpec().orderBy();
+        public OrderBy orderBy() {
+            return relation.querySpec().orderBy().orElse(null);
         }
 
         @Override
@@ -976,7 +1012,7 @@ public class LogicalPlanner {
         }
 
         @Override
-        public Optional<List<Function>> aggregates() {
+        public List<Function> aggregates() {
             return aggregates;
         }
 
