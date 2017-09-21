@@ -22,11 +22,14 @@
 
 package io.crate.planner.operators;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import io.crate.action.sql.SessionContext;
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.QueriedTableRelation;
 import io.crate.analyze.WhereClause;
+import io.crate.analyze.relations.AbstractTableRelation;
+import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.relations.TableFunctionRelation;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Literal;
@@ -53,11 +56,14 @@ import io.crate.planner.projection.builder.ProjectionBuilder;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static io.crate.planner.operators.Limit.limitAndOffset;
+import static io.crate.planner.operators.LogicalPlanner.extractColumns;
 
 /**
  * An Operator for data-collection.
@@ -71,7 +77,7 @@ import static io.crate.planner.operators.Limit.limitAndOffset;
  *  Instead it may choose to output {@link DocSysColumns#FETCHID} + {@code usedColumns}.
  *
  *  {@link FetchOrEval} will then later use {@code fetchId} to fetch the values for the columns which are "unused".
- *  See also {@link LogicalPlan.Builder#build(Set)}
+ *  See also {@link LogicalPlan.Builder#build(Set)} )}
  */
 class Collect implements LogicalPlan {
 
@@ -81,16 +87,21 @@ class Collect implements LogicalPlan {
 
     final List<Symbol> toCollect;
     final TableInfo tableInfo;
+    private final List<AbstractTableRelation> baseTables;
 
-    Collect(QueriedTableRelation relation, List<Symbol> toCollect, WhereClause where, Set<Symbol> usedColumns) {
+    Collect(QueriedTableRelation relation, List<Symbol> toCollect, WhereClause where, Set<Symbol> usedBeforeNextFetch) {
         if (where.hasVersions()) {
             throw new VersionInvalidException();
         }
         this.relation = relation;
         this.where = where;
+        this.baseTables = ImmutableList.of(relation.tableRelation());
+        AbstractTableRelation tableRelation = relation.tableRelation();
         this.tableInfo = relation.tableRelation().tableInfo();
-        if (tableInfo instanceof DocTableInfo) {
-            this.toCollect = generateToCollectWithFetch(tableInfo.ident(), toCollect, usedColumns);
+        if (tableRelation instanceof DocTableRelation) {
+            Set<Symbol> colsToCollect = extractColumns(toCollect);
+            Sets.SetView<Symbol> unusedCols = Sets.difference(colsToCollect, usedBeforeNextFetch);
+            this.toCollect = generateToCollectWithFetch(tableInfo.ident(), toCollect, unusedCols, usedBeforeNextFetch);
         } else {
             this.toCollect = toCollect;
             if (where.hasQuery()) {
@@ -101,9 +112,8 @@ class Collect implements LogicalPlan {
 
     private static List<Symbol> generateToCollectWithFetch(TableIdent tableIdent,
                                                            List<Symbol> toCollect,
+                                                           Collection<Symbol> unusedCols,
                                                            Set<Symbol> usedColumns) {
-        Set<Symbol> colsToCollect = LogicalPlanner.extractColumns(toCollect);
-        Sets.SetView<Symbol> unusedCols = Sets.difference(colsToCollect, usedColumns);
         ArrayList<Symbol> fetchable = new ArrayList<>();
         Symbol scoreCol = null;
         for (Symbol unusedCol : unusedCols) {
@@ -215,9 +225,14 @@ class Collect implements LogicalPlan {
         return tableInfo instanceof DocTableInfo;
     }
 
+    public Map<Symbol, Symbol> expressionMapping() {
+        return Collections.emptyMap();
+    }
+
+
     @Override
-    public List<TableInfo> baseTables() {
-        return Collections.singletonList(tableInfo);
+    public List<AbstractTableRelation> baseTables() {
+        return baseTables;
     }
 
     @Override
