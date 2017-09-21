@@ -26,7 +26,6 @@ import io.crate.analyze.symbol.InputColumn;
 import io.crate.metadata.Reference;
 
 import java.util.Collection;
-import java.util.LinkedHashSet;
 import java.util.List;
 
 public class FetchSource {
@@ -34,10 +33,6 @@ public class FetchSource {
     private final List<Reference> partitionedByColumns;
     private final Collection<InputColumn> fetchIdCols;
     private final Collection<Reference> references;
-
-    public FetchSource(List<Reference> partitionedByColumns) {
-        this(partitionedByColumns, new LinkedHashSet<>(), new LinkedHashSet<>());
-    }
 
     public FetchSource(List<Reference> partitionedByColumns,
                        Collection<InputColumn> fetchIdCols,

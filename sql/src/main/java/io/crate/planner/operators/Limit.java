@@ -23,10 +23,11 @@
 package io.crate.planner.operators;
 
 import io.crate.analyze.OrderBy;
+import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.symbol.InputColumn;
 import io.crate.analyze.symbol.Literal;
 import io.crate.analyze.symbol.Symbol;
-import io.crate.metadata.table.TableInfo;
+import io.crate.metadata.Reference;
 import io.crate.operation.projectors.TopN;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
@@ -37,6 +38,7 @@ import io.crate.planner.projection.builder.ProjectionBuilder;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.Map;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
 
@@ -101,8 +103,13 @@ class Limit implements LogicalPlan {
     }
 
     @Override
-    public List<TableInfo> baseTables() {
-        return source.baseTables();
+    public Map<Symbol, Symbol> expressionMapping() {
+        return source.expressionMapping();
+    }
+
+    @Override
+    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
+        return source.fetchReferencesByTable();
     }
 
     @Override

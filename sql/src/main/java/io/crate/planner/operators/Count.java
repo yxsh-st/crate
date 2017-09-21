@@ -22,10 +22,15 @@
 
 package io.crate.planner.operators;
 
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.WhereClause;
+import io.crate.analyze.relations.AbstractTableRelation;
+import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Symbol;
+import io.crate.metadata.Reference;
 import io.crate.metadata.Routing;
 import io.crate.metadata.table.TableInfo;
 import io.crate.planner.Plan;
@@ -41,6 +46,7 @@ import io.crate.types.DataTypes;
 import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * An optimized version for "select count(*) from t where ..."
@@ -48,13 +54,13 @@ import java.util.List;
 public class Count implements LogicalPlan {
 
     private static final String COUNT_PHASE_NAME = "count-merge";
-    final TableInfo tableInfo;
+    final AbstractTableRelation<TableInfo> tableRelation;
     final WhereClause where;
     private final List<Symbol> outputs;
 
-    Count(Function countFunction, TableInfo tableInfo, WhereClause where) {
+    Count(Function countFunction, AbstractTableRelation<TableInfo> tableRelation, WhereClause where) {
         this.outputs = Collections.singletonList(countFunction);
-        this.tableInfo = tableInfo;
+        this.tableRelation = tableRelation;
         this.where = where;
     }
 
@@ -67,7 +73,7 @@ public class Count implements LogicalPlan {
                       @Nullable Integer pageSizeHint) {
 
         Routing routing = plannerContext.allocateRouting(
-            tableInfo, where, null, plannerContext.transactionContext().sessionContext());
+            tableRelation.tableInfo(), where, null, plannerContext.transactionContext().sessionContext());
         CountPhase countPhase = new CountPhase(
             plannerContext.nextExecutionPhaseId(),
             routing,
@@ -99,7 +105,12 @@ public class Count implements LogicalPlan {
     }
 
     @Override
-    public List<TableInfo> baseTables() {
-        return Collections.singletonList(tableInfo);
+    public BiMap<Symbol, Symbol> expressionMapping() {
+        return HashBiMap.create(0);
+    }
+
+    @Override
+    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
+        return Collections.emptyMap();
     }
 }

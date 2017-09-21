@@ -22,12 +22,14 @@
 
 package io.crate.integrationtests;
 
+import com.carrotsearch.randomizedtesting.annotations.Seed;
 import org.junit.Before;
 import org.junit.Test;
 
 import static io.crate.testing.TestingHelpers.printedTable;
 import static org.hamcrest.Matchers.is;
 
+@Seed("C06213AB3FADF6F6:F83C5604F0263B74")
 public class SubSelectGroupByIntegrationTest extends SQLTransportIntegrationTest {
 
     @Before

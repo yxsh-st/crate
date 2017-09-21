@@ -23,12 +23,14 @@
 package io.crate.planner.operators;
 
 import io.crate.analyze.OrderBy;
+import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.symbol.AggregateMode;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
+import io.crate.metadata.Reference;
 import io.crate.metadata.RowGranularity;
-import io.crate.metadata.table.TableInfo;
+import io.crate.metadata.doc.DocTableInfo;
 import io.crate.operation.projectors.TopN;
 import io.crate.planner.Merge;
 import io.crate.planner.Plan;
@@ -44,6 +46,7 @@ import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 
 import static io.crate.planner.operators.LogicalPlanner.NO_LIMIT;
 import static io.crate.planner.operators.LogicalPlanner.extractColumns;
@@ -82,32 +85,36 @@ public class GroupHashAggregate implements LogicalPlan {
                       @Nullable Integer pageSizeHint) {
 
         Plan plan = source.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null, null);
-        if (ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
+        List<Symbol> sourceOutputs = source.outputs();
+        if (plan.resultDescription().hasRemainingLimitOrOffset()) {
+            plan = Merge.ensureOnHandler(plan, plannerContext);
+        }
+        if (sourceHasRowAuthority(plan) ||
+            ExecutionPhases.executesOnHandler(plannerContext.handlerNode(), plan.resultDescription().nodeIds())) {
+
             GroupProjection groupProjection = projectionBuilder.groupProjection(
-                source.outputs(),
+                sourceOutputs,
                 groupKeys,
                 aggregates,
                 AggregateMode.ITER_FINAL,
-                RowGranularity.CLUSTER
+                source.preferShardProjections() ? RowGranularity.SHARD : RowGranularity.CLUSTER
             );
             plan.addProjection(groupProjection);
             return plan;
         }
-
-
         GroupProjection toPartial = projectionBuilder.groupProjection(
-            source.outputs(),
+            sourceOutputs,
             groupKeys,
             aggregates,
             AggregateMode.ITER_PARTIAL,
-            RowGranularity.SHARD
+            source.preferShardProjections() ? RowGranularity.SHARD : RowGranularity.NODE
         );
         plan.addProjection(toPartial);
         plan.setDistributionInfo(DistributionInfo.DEFAULT_MODULO);
 
 
         GroupProjection toFinal = projectionBuilder.groupProjection(
-            outputs,
+            this.outputs,
             groupKeys,
             aggregates,
             AggregateMode.PARTIAL_FINAL,
@@ -128,10 +135,19 @@ public class GroupHashAggregate implements LogicalPlan {
             ),
             TopN.NO_LIMIT,
             TopN.NO_OFFSET,
-            outputs.size(),
+            this.outputs.size(),
             TopN.NO_LIMIT,
             null
         );
+    }
+
+    private boolean sourceHasRowAuthority(Plan plan) {
+        return plan instanceof Collect &&
+               ((Collect) plan).tableInfo instanceof DocTableInfo &&
+               GroupByConsumer.groupedByClusteredColumnOrPrimaryKeys(
+                   ((DocTableInfo) ((Collect) plan).tableInfo),
+                   ((Collect) plan).where,
+                   groupKeys);
     }
 
     @Override
@@ -149,8 +165,21 @@ public class GroupHashAggregate implements LogicalPlan {
     }
 
     @Override
-    public List<TableInfo> baseTables() {
-        return source.baseTables();
+    public Map<Symbol, Symbol> expressionMapping() {
+        return source.expressionMapping();
     }
 
+    @Override
+    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
+        return source.fetchReferencesByTable();
+    }
+
+    @Override
+    public String toString() {
+        return "GroupBy{" +
+               "src=" + source +
+               ", keys=" + groupKeys +
+               ", agg=" + aggregates +
+               '}';
+    }
 }

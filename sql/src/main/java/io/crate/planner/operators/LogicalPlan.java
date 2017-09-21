@@ -23,22 +23,27 @@
 package io.crate.planner.operators;
 
 import io.crate.analyze.OrderBy;
+import io.crate.analyze.relations.DocTableRelation;
+import io.crate.analyze.symbol.FieldReplacer;
+import io.crate.analyze.symbol.RefReplacer;
 import io.crate.analyze.symbol.Symbol;
-import io.crate.metadata.RowGranularity;
-import io.crate.metadata.table.TableInfo;
+import io.crate.collections.Lists2;
+import io.crate.metadata.Reference;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
 import io.crate.planner.projection.builder.ProjectionBuilder;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * LogicalPlan is a tree of "Operators"
  * This is a representation of the logical order of operators that need to be executed to produce a correct result.
  *
- * {@link #build(Planner.Context, ProjectionBuilder, int, int, OrderBy)} is used to create the
+ * {@link #build(Planner.Context, ProjectionBuilder, int, int, OrderBy, Integer)} is used to create the
  * actual "physical" execution plan.
  *
  * A Operator is something like Limit, OrderBy, HashAggregate, Join, Union, Collect
@@ -52,7 +57,7 @@ import java.util.Set;
  *     Collect [x, y, z]
  * </pre>
  *
- * {@link #build(Planner.Context, ProjectionBuilder, int, int, OrderBy)} is called on the "root" and flows down.
+ * {@link #build(Planner.Context, ProjectionBuilder, int, int, OrderBy, Integer)} is called on the "root" and flows down.
  * Each time each operator may provide "hints" to the children so that they can decide to eagerly apply parts of the
  * operations
  *
@@ -72,12 +77,34 @@ import java.util.Set;
  */
 public interface LogicalPlan {
 
+    static List<Symbol> mappedSymbols(List<Symbol> sourceOutputs, Map<Symbol, Symbol> mapping) {
+        if (mapping.isEmpty()) {
+            return sourceOutputs;
+        }
+        return Lists2.copyAndReplace(sourceOutputs, getMapper(mapping));
+    }
+
+    static Function<Symbol, Symbol> getMapper(Map<Symbol, Symbol> mapping) {
+        return s -> {
+            Symbol mapped = mapping.get(s);
+            if (mapped != null) {
+                return mapped;
+            }
+            mapped = FieldReplacer.replaceFields(s, f -> mapping.getOrDefault(f, f));
+            if (mapped != s) {
+                return mapped;
+            }
+            mapped = RefReplacer.replaceRefs(s, r -> mapping.getOrDefault(r, r));
+            return mapped;
+        };
+    }
+
     interface Builder {
 
         /**
          * Create a LogicalPlan node
          *
-         * @param usedColumns The columns the "parent" is using.
+         * @param usedBeforeNextFetch The columns the "parent" is using.
          *                    This is used to create plans which utilize query-then-fetch.
          *                    For example:
          *                    <pre>
@@ -94,7 +121,7 @@ public interface LogicalPlan {
          *                         outputs: [_fetch, a]
          *                    </pre>
          */
-        LogicalPlan build(Set<Symbol> usedColumns);
+        LogicalPlan build(Set<Symbol> usedBeforeNextFetch);
     }
 
     /**
@@ -118,9 +145,25 @@ public interface LogicalPlan {
 
     List<Symbol> outputs();
 
-    default RowGranularity dataGranularity() {
-        return RowGranularity.DOC;
+    /**
+     * A mapping from from symbol to symbol.
+     * This is used across relation boundaries to map parent expression to source expression
+     *
+     * Example:
+     * <pre>
+     *     select tt.bb from
+     *          (select t.b + t.b as bb from t) tt
+     *
+     * expressionMapping
+     *      tt.bb -> t.b + t.b
+     * </pre>
+     */
+    Map<Symbol, Symbol> expressionMapping();
+
+
+    default boolean preferShardProjections() {
+        return false;
     }
 
-    List<TableInfo> baseTables();
+    Map<DocTableRelation, List<Reference>> fetchReferencesByTable();
 }
