@@ -28,6 +28,7 @@ import io.crate.analyze.WhereClause;
 import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.metadata.Reference;
+import io.crate.metadata.RowGranularity;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
 import io.crate.planner.projection.FilterProjection;
@@ -79,6 +80,9 @@ class Filter implements LogicalPlan {
                       @Nullable Integer pageSizeHint) {
         Plan plan = source.build(plannerContext, projectionBuilder, limit, offset, order, pageSizeHint);
         FilterProjection filterProjection = ProjectionBuilder.filterProjection(source.outputs(), queryClause);
+        if (plan.resultDescription().executesOnShard()) {
+            filterProjection.requiredGranularity(RowGranularity.SHARD);
+        }
         plan.addProjection(filterProjection);
         return plan;
     }

@@ -86,6 +86,10 @@ public interface ResultDescription {
      */
     List<DataType> streamOutputs();
 
+    default boolean executesOnShard() {
+        return false;
+    }
+
     default boolean hasRemainingLimitOrOffset() {
         return limit() != TopN.NO_LIMIT || offset() != 0;
     }

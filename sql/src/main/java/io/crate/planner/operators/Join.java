@@ -35,6 +35,7 @@ import io.crate.analyze.symbol.InputColumn;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
 import io.crate.metadata.Reference;
+import io.crate.operation.operator.AndOperator;
 import io.crate.operation.projectors.TopN;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
@@ -164,6 +165,9 @@ public class Join implements LogicalPlan {
                 }
                 joinNames.add(nextName);
             }
+            if (!queryParts.isEmpty()) {
+                join = new Filter(join, new WhereClause(AndOperator.join(queryParts.values())));
+            }
             return join;
         };
     }
@@ -231,7 +235,6 @@ public class Join implements LogicalPlan {
         Plan right = rhs.build(plannerContext, projectionBuilder, NO_LIMIT, 0, null, null);
 
         // TODO: distribution planning
-
         List<String> nlExecutionNodes = Collections.singletonList(plannerContext.handlerNode());
         Symbol joinInput = null;
         if (joinCondition != null) {

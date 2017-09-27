@@ -41,8 +41,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static io.crate.planner.operators.LogicalPlanner.NO_LIMIT;
-
 class Order implements LogicalPlan {
 
     final LogicalPlan source;
@@ -86,8 +84,8 @@ class Order implements LogicalPlan {
         }
         InputColumns.Context ctx = new InputColumns.Context(source.outputs());
         OrderedTopNProjection topNProjection = new OrderedTopNProjection(
-            limit,
-            offset,
+            Limit.limitAndOffset(limit, offset),
+            0,
             InputColumns.create(outputs, ctx),
             InputColumns.create(orderBy.orderBySymbols(), ctx),
             orderBy.reverseFlags(),
@@ -95,8 +93,8 @@ class Order implements LogicalPlan {
         );
         plan.addProjection(
             topNProjection,
-            NO_LIMIT,
-            0,
+            limit,
+            offset,
             PositionalOrderBy.of(orderBy, outputs)
         );
         return plan;

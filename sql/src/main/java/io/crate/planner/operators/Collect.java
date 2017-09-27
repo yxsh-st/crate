@@ -40,6 +40,7 @@ import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.symbol.SymbolVisitor;
 import io.crate.analyze.symbol.Symbols;
 import io.crate.exceptions.UnsupportedFeatureException;
+import io.crate.exceptions.VersionInvalidException;
 import io.crate.metadata.DocReferences;
 import io.crate.metadata.Reference;
 import io.crate.metadata.RowGranularity;
@@ -66,6 +67,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static io.crate.planner.operators.Limit.limitAndOffset;
+import static io.crate.planner.operators.LogicalPlanner.extractColumns;
+
 /**
  * An Operator for data-collection.
  * Data collection can occur on base-tables (either lucene-table, sys-table, or table-function).
@@ -91,12 +95,15 @@ class Collect implements LogicalPlan {
     private final Map<DocTableRelation, List<Reference>> fetchReferencesByTable;
 
     Collect(QueriedTableRelation relation, List<Symbol> toCollect, WhereClause where, Set<Symbol> usedBeforeNextFetch) {
+        if (where.hasVersions()) {
+            throw new VersionInvalidException();
+        }
         this.relation = relation;
         this.where = where;
         AbstractTableRelation tableRelation = relation.tableRelation();
         this.tableInfo = relation.tableRelation().tableInfo();
         if (tableRelation instanceof DocTableRelation) {
-            Set<Symbol> colsToCollect = LogicalPlanner.extractColumns(toCollect);
+            Set<Symbol> colsToCollect = extractColumns(toCollect);
             Sets.SetView<Symbol> unusedCols = Sets.difference(colsToCollect, usedBeforeNextFetch);
             List<Reference> toFetch = new ArrayList<>();
             for (Symbol unusedCol : unusedCols) {
@@ -153,13 +160,14 @@ class Collect implements LogicalPlan {
         RoutedCollectPhase collectPhase = createPhase(plannerContext);
         relation.tableRelation().validateOrderBy(order);
         collectPhase.orderBy(order);
-        maybeApplyPageSize(limit, pageSizeHint, collectPhase);
+        int limitAndOffset = limitAndOffset(limit, offset);
+        maybeApplyPageSize(limitAndOffset, pageSizeHint, collectPhase);
         return new io.crate.planner.node.dql.Collect(
             collectPhase,
             limit,
             offset,
             toCollect.size(),
-            limit,
+            limitAndOffset,
             PositionalOrderBy.of(order, toCollect)
         );
     }
