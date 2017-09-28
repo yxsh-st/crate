@@ -25,9 +25,8 @@ package io.crate.planner.operators;
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.QueryClause;
 import io.crate.analyze.WhereClause;
-import io.crate.analyze.relations.DocTableRelation;
+import io.crate.analyze.relations.AbstractTableRelation;
 import io.crate.analyze.symbol.Symbol;
-import io.crate.metadata.Reference;
 import io.crate.metadata.RowGranularity;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
@@ -103,7 +102,7 @@ class Filter implements LogicalPlan {
     }
 
     @Override
-    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
-        return source.fetchReferencesByTable();
+    public List<AbstractTableRelation> baseTables() {
+        return source.baseTables();
     }
 }

@@ -23,10 +23,9 @@
 package io.crate.planner.operators;
 
 import io.crate.analyze.OrderBy;
-import io.crate.analyze.relations.DocTableRelation;
+import io.crate.analyze.relations.AbstractTableRelation;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
-import io.crate.metadata.Reference;
 import io.crate.planner.Merge;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
@@ -91,11 +90,12 @@ class Order implements LogicalPlan {
             orderBy.reverseFlags(),
             orderBy.nullsFirst()
         );
+        PositionalOrderBy positionalOrderBy = plan.resultDescription().nodeIds().size() == 1 ? null : PositionalOrderBy.of(orderBy, outputs);
         plan.addProjection(
             topNProjection,
             limit,
             offset,
-            PositionalOrderBy.of(orderBy, outputs)
+            positionalOrderBy
         );
         return plan;
     }
@@ -120,8 +120,8 @@ class Order implements LogicalPlan {
     }
 
     @Override
-    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
-        return source.fetchReferencesByTable();
+    public List<AbstractTableRelation> baseTables() {
+        return source.baseTables();
     }
 
     @Override

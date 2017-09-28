@@ -23,12 +23,11 @@
 package io.crate.planner.operators;
 
 import io.crate.analyze.OrderBy;
-import io.crate.analyze.relations.DocTableRelation;
+import io.crate.analyze.relations.AbstractTableRelation;
 import io.crate.analyze.symbol.FieldReplacer;
 import io.crate.analyze.symbol.RefReplacer;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
-import io.crate.metadata.Reference;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
 import io.crate.planner.projection.builder.ProjectionBuilder;
@@ -165,5 +164,5 @@ public interface LogicalPlan {
         return false;
     }
 
-    Map<DocTableRelation, List<Reference>> fetchReferencesByTable();
+    List<AbstractTableRelation> baseTables();
 }

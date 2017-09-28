@@ -27,10 +27,8 @@ import com.google.common.collect.HashBiMap;
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.WhereClause;
 import io.crate.analyze.relations.AbstractTableRelation;
-import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Symbol;
-import io.crate.metadata.Reference;
 import io.crate.metadata.Routing;
 import io.crate.metadata.table.TableInfo;
 import io.crate.planner.Plan;
@@ -46,7 +44,6 @@ import io.crate.types.DataTypes;
 import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * An optimized version for "select count(*) from t where ..."
@@ -54,13 +51,17 @@ import java.util.Map;
 public class Count implements LogicalPlan {
 
     private static final String COUNT_PHASE_NAME = "count-merge";
+
     final AbstractTableRelation<TableInfo> tableRelation;
     final WhereClause where;
+
     private final List<Symbol> outputs;
+    private final List<AbstractTableRelation> baseTables;
 
     Count(Function countFunction, AbstractTableRelation<TableInfo> tableRelation, WhereClause where) {
         this.outputs = Collections.singletonList(countFunction);
         this.tableRelation = tableRelation;
+        this.baseTables = Collections.singletonList(tableRelation);
         this.where = where;
     }
 
@@ -110,7 +111,7 @@ public class Count implements LogicalPlan {
     }
 
     @Override
-    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
-        return Collections.emptyMap();
+    public List<AbstractTableRelation> baseTables() {
+        return baseTables;
     }
 }

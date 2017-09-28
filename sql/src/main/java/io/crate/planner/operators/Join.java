@@ -25,8 +25,8 @@ package io.crate.planner.operators;
 import io.crate.analyze.MultiSourceSelect;
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.WhereClause;
+import io.crate.analyze.relations.AbstractTableRelation;
 import io.crate.analyze.relations.AnalyzedRelation;
-import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.relations.JoinPair;
 import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.relations.QuerySplitter;
@@ -34,7 +34,6 @@ import io.crate.analyze.symbol.FieldsVisitor;
 import io.crate.analyze.symbol.InputColumn;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
-import io.crate.metadata.Reference;
 import io.crate.operation.operator.AndOperator;
 import io.crate.operation.projectors.TopN;
 import io.crate.planner.Plan;
@@ -54,6 +53,7 @@ import io.crate.sql.tree.QualifiedName;
 import org.elasticsearch.common.util.set.Sets;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -79,7 +79,7 @@ public class Join implements LogicalPlan {
 
     private final HashMap<Symbol, Symbol> expressionMapping;
 
-    private final HashMap<DocTableRelation, List<Reference>> fetchReferencesByTable;
+    private final ArrayList<AbstractTableRelation> baseTables;
 
     static Builder createNodes(MultiSourceSelect mss, WhereClause where) {
         return usedColumns -> {
@@ -165,6 +165,7 @@ public class Join implements LogicalPlan {
                 }
                 joinNames.add(nextName);
             }
+            // TODO: probably can be applied earlier - might only match a single relation but isn't pushed down due to outer join?
             if (!queryParts.isEmpty()) {
                 join = new Filter(join, new WhereClause(AndOperator.join(queryParts.values())));
             }
@@ -215,10 +216,14 @@ public class Join implements LogicalPlan {
         this.rhs = rhs;
         this.joinType = joinType;
         this.joinCondition = joinCondition;
-        this.outputs = Lists2.concat(lhs.outputs(), rhs.outputs());
-        this.fetchReferencesByTable = new HashMap<>();
-        this.fetchReferencesByTable.putAll(lhs.fetchReferencesByTable());
-        this.fetchReferencesByTable.putAll(rhs.fetchReferencesByTable());
+        if (joinType == JoinType.SEMI) {
+            this.outputs = lhs.outputs();
+        } else {
+            this.outputs = Lists2.concat(lhs.outputs(), rhs.outputs());
+        }
+        this.baseTables = new ArrayList<>();
+        this.baseTables.addAll(lhs.baseTables());
+        this.baseTables.addAll(rhs.baseTables());
         this.expressionMapping = new HashMap<>();
         this.expressionMapping.putAll(lhs.expressionMapping());
         this.expressionMapping.putAll(rhs.expressionMapping());
@@ -238,7 +243,7 @@ public class Join implements LogicalPlan {
         List<String> nlExecutionNodes = Collections.singletonList(plannerContext.handlerNode());
         Symbol joinInput = null;
         if (joinCondition != null) {
-            joinInput = InputColumns.create(joinCondition, outputs);
+            joinInput = InputColumns.create(joinCondition, Lists2.concat(lhs.outputs(), rhs.outputs()));
         }
         NestedLoopPhase nlPhase = new NestedLoopPhase(
             plannerContext.jobId(),
@@ -317,7 +322,7 @@ public class Join implements LogicalPlan {
     }
 
     @Override
-    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
-        return fetchReferencesByTable;
+    public List<AbstractTableRelation> baseTables() {
+        return baseTables;
     }
 }

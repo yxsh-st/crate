@@ -58,7 +58,7 @@ public class LogicalPlanner {
             .build(new HashSet<>(queriedRelation.outputs()))
             .tryCollapse();
 
-        return logicalPlan.build(
+        Plan plan = logicalPlan.build(
             plannerContext,
             projectionBuilder,
             LogicalPlanner.NO_LIMIT,
@@ -66,6 +66,7 @@ public class LogicalPlanner {
             null,
             null
         );
+        return plan;
     }
 
     static LogicalPlan.Builder plan(QueriedRelation relation, FetchMode fetchMode, boolean isLastFetch) {

@@ -23,12 +23,11 @@
 package io.crate.planner.operators;
 
 import io.crate.analyze.OrderBy;
-import io.crate.analyze.relations.DocTableRelation;
+import io.crate.analyze.relations.AbstractTableRelation;
 import io.crate.analyze.symbol.AggregateMode;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
-import io.crate.metadata.Reference;
 import io.crate.metadata.RowGranularity;
 import io.crate.metadata.doc.DocTableInfo;
 import io.crate.operation.projectors.TopN;
@@ -185,8 +184,8 @@ public class GroupHashAggregate implements LogicalPlan {
     }
 
     @Override
-    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
-        return source.fetchReferencesByTable();
+    public List<AbstractTableRelation> baseTables() {
+        return source.baseTables();
     }
 
     @Override

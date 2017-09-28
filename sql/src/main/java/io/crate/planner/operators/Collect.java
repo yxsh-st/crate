@@ -24,7 +24,7 @@ package io.crate.planner.operators;
 
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
-import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import io.crate.action.sql.SessionContext;
 import io.crate.analyze.OrderBy;
@@ -35,15 +35,12 @@ import io.crate.analyze.relations.DocTableRelation;
 import io.crate.analyze.relations.TableFunctionRelation;
 import io.crate.analyze.symbol.Function;
 import io.crate.analyze.symbol.Literal;
-import io.crate.analyze.symbol.RefVisitor;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.symbol.SymbolVisitor;
 import io.crate.analyze.symbol.Symbols;
 import io.crate.exceptions.UnsupportedFeatureException;
 import io.crate.exceptions.VersionInvalidException;
-import io.crate.metadata.DocReferences;
 import io.crate.metadata.Reference;
-import io.crate.metadata.RowGranularity;
 import io.crate.metadata.TableIdent;
 import io.crate.metadata.doc.DocSysColumns;
 import io.crate.metadata.doc.DocTableInfo;
@@ -64,7 +61,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import static io.crate.planner.operators.Limit.limitAndOffset;
@@ -92,7 +88,7 @@ class Collect implements LogicalPlan {
 
     final List<Symbol> toCollect;
     final TableInfo tableInfo;
-    private final Map<DocTableRelation, List<Reference>> fetchReferencesByTable;
+    private final List<AbstractTableRelation> baseTables;
 
     Collect(QueriedTableRelation relation, List<Symbol> toCollect, WhereClause where, Set<Symbol> usedBeforeNextFetch) {
         if (where.hasVersions()) {
@@ -100,23 +96,14 @@ class Collect implements LogicalPlan {
         }
         this.relation = relation;
         this.where = where;
+        this.baseTables = ImmutableList.of(relation.tableRelation());
         AbstractTableRelation tableRelation = relation.tableRelation();
         this.tableInfo = relation.tableRelation().tableInfo();
         if (tableRelation instanceof DocTableRelation) {
             Set<Symbol> colsToCollect = extractColumns(toCollect);
             Sets.SetView<Symbol> unusedCols = Sets.difference(colsToCollect, usedBeforeNextFetch);
-            List<Reference> toFetch = new ArrayList<>();
-            for (Symbol unusedCol : unusedCols) {
-                RefVisitor.visitRefs(unusedCol, r -> {
-                    if (r.granularity() == RowGranularity.DOC) {
-                        toFetch.add(DocReferences.toSourceLookup(r));
-                    }
-                });
-            }
-            this.fetchReferencesByTable = ImmutableMap.of((DocTableRelation) tableRelation, toFetch);
             this.toCollect = generateToCollectWithFetch(tableInfo.ident(), toCollect, unusedCols, usedBeforeNextFetch);
         } else {
-            this.fetchReferencesByTable = Collections.emptyMap();
             this.toCollect = toCollect;
             if (where.hasQuery()) {
                 NoPredicateVisitor.ensureNoMatchPredicate(where.query());
@@ -164,8 +151,8 @@ class Collect implements LogicalPlan {
         maybeApplyPageSize(limitAndOffset, pageSizeHint, collectPhase);
         return new io.crate.planner.node.dql.Collect(
             collectPhase,
-            limit,
-            offset,
+            TopN.NO_LIMIT,
+            0,
             toCollect.size(),
             limitAndOffset,
             PositionalOrderBy.of(order, toCollect)
@@ -242,8 +229,8 @@ class Collect implements LogicalPlan {
     }
 
     @Override
-    public Map<DocTableRelation, List<Reference>> fetchReferencesByTable() {
-        return fetchReferencesByTable;
+    public List<AbstractTableRelation> baseTables() {
+        return baseTables;
     }
 
     @Override
