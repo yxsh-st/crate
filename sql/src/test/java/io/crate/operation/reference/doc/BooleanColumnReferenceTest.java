@@ -24,15 +24,18 @@ package io.crate.operation.reference.doc;
 import io.crate.operation.reference.doc.lucene.BooleanColumnReference;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.NumericDocValuesField;
+import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
+import org.elasticsearch.index.mapper.BooleanFieldMapper;
+import org.elasticsearch.index.mapper.MappedFieldType;
 import org.junit.Test;
 
+import static org.elasticsearch.index.mapper.BooleanFieldMapper.Values.*;
 import static org.hamcrest.core.Is.is;
 
 public class BooleanColumnReferenceTest extends DocLevelExpressionsTest {
@@ -44,14 +47,15 @@ public class BooleanColumnReferenceTest extends DocLevelExpressionsTest {
         for (int i = 0; i < 10; i++) {
             Document doc = new Document();
             doc.add(new StringField("_id", Integer.toString(i), Field.Store.NO));
-            doc.add(new NumericDocValuesField(column, i % 2 == 0 ? 1 : 0));
+            doc.add(new SortedDocValuesField(column, i % 2 == 0 ? TRUE : FALSE));
             writer.addDocument(doc);
         }
     }
 
     @Test
     public void testBooleanExpression() throws Exception {
-        BooleanColumnReference booleanColumn = new BooleanColumnReference(column);
+        MappedFieldType fieldType = BooleanFieldMapper.Defaults.FIELD_TYPE.clone();
+        BooleanColumnReference booleanColumn = new BooleanColumnReference(column, fieldType);
         booleanColumn.startCollect(ctx);
         booleanColumn.setNextReader(readerContext);
         IndexSearcher searcher = new IndexSearcher(readerContext.reader());

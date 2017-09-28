@@ -111,7 +111,7 @@ public class LuceneReferenceResolver implements ReferenceResolver<LuceneCollecto
             case DoubleType.ID:
                 return new DoubleColumnReference(colName, fieldType);
             case BooleanType.ID:
-                return new BooleanColumnReference(colName);
+                return new BooleanColumnReference(colName, fieldType);
             case ObjectType.ID:
                 return new ObjectColumnReference(colName);
             case FloatType.ID:
