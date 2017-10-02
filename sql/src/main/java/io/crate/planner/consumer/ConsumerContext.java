@@ -23,12 +23,13 @@ package io.crate.planner.consumer;
 
 
 import io.crate.planner.Planner;
+import io.crate.planner.operators.FetchMode;
 
 public class ConsumerContext {
 
     private final Planner.Context plannerContext;
 
-    private FetchMode fetchMode = FetchMode.NO_PROPAGATION;
+    private FetchMode fetchMode = FetchMode.CLEAR_USED_COLUMNS;
 
     public ConsumerContext(Planner.Context plannerContext) {
         this.plannerContext = plannerContext;

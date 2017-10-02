@@ -34,6 +34,7 @@ import io.crate.metadata.DocReferences;
 import io.crate.planner.Merge;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
+import io.crate.planner.operators.FetchMode;
 import io.crate.planner.projection.ColumnIndexWriterProjection;
 import io.crate.planner.projection.MergeCountProjection;
 import org.elasticsearch.common.settings.Settings;
@@ -75,7 +76,7 @@ public final class InsertFromSubQueryPlanner {
                                                   "supported on insert using a sub-query");
         }
         SOURCE_LOOKUP_CONVERTER.process(subRelation, null);
-        context.setFetchMode(FetchMode.NEVER);
+        context.setFetchMode(FetchMode.PROPAGATE_USED_COLUMNS);
         Planner.Context plannerContext = context.plannerContext();
         Plan plannedSubQuery = plannerContext.planSubRelation(subRelation, context);
         if (plannedSubQuery == null) {

@@ -34,7 +34,6 @@ import io.crate.operation.projectors.TopN;
 import io.crate.planner.Merge;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
-import io.crate.planner.consumer.FetchMode;
 import io.crate.planner.distribution.DistributionInfo;
 import io.crate.planner.node.ExecutionPhases;
 import io.crate.planner.node.dql.GroupByConsumer;
@@ -66,7 +65,7 @@ public class GroupHashAggregate implements LogicalPlan {
             HashSet<Symbol> usedCols = new HashSet<>();
             usedCols.addAll(groupKeys);
             usedCols.addAll(extractColumns(aggregates));
-            return new GroupHashAggregate(source.build(usedCols, FetchMode.NO_PROPAGATION), groupKeys, aggregates);
+            return new GroupHashAggregate(source.build(usedCols, fetchMode), groupKeys, aggregates);
         };
     }
 

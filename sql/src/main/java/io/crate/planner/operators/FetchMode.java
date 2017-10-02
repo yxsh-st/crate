@@ -20,18 +20,10 @@
  * agreement.
  */
 
-package io.crate.planner.consumer;
+package io.crate.planner.operators;
 
-/**
- * Component to help make decisions in the planner on how/if fetch-phases should be planned.
- *
- * This is mostly relevant for nested-relations where the plan being created will also contain one or more sub-plans.
- * A planner component for a parent-relation can set a FetchMode on the {@link ConsumerContext} to influence the planning of
- * child-relations.
- */
 public enum FetchMode {
 
-    NEVER,
-    NO_PROPAGATION,
-    WITH_PROPAGATION
+    CLEAR_USED_COLUMNS,
+    PROPAGATE_USED_COLUMNS
 }

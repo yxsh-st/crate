@@ -27,7 +27,6 @@ import io.crate.analyze.SelectAnalyzedStatement;
 import io.crate.analyze.relations.QueriedRelation;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.analyze.symbol.format.SymbolPrinter;
-import io.crate.planner.consumer.FetchMode;
 import io.crate.test.integration.CrateDummyClusterServiceUnitTest;
 import io.crate.testing.SQLExecutor;
 import org.hamcrest.FeatureMatcher;
@@ -54,7 +53,7 @@ public class LogicalPlannerTest extends CrateDummyClusterServiceUnitTest {
         SelectAnalyzedStatement analyzedStatement = sqlExecutor.analyze(statement);
         QueriedRelation relation = analyzedStatement.relation();
         return LogicalPlanner.plan(relation, true)
-            .build(LogicalPlanner.extractColumns(relation.querySpec().outputs()), FetchMode.NO_PROPAGATION)
+            .build(LogicalPlanner.extractColumns(relation.querySpec().outputs()), FetchMode.CLEAR_USED_COLUMNS)
             .tryCollapse();
     }
 
@@ -96,9 +95,10 @@ public class LogicalPlannerTest extends CrateDummyClusterServiceUnitTest {
         assertThat(plan, isPlan("Limit[1;0]\n" +
                                 "OrderBy[x]\n" +
                                 "Boundary[a, x]\n" +
+                                "FetchOrEval[a, x]\n" +
                                 "Limit[3;0]\n" +
                                 "OrderBy[a]\n" +
-                                "Collect[doc.t1 | [a, x] | All]\n"));
+                                "Collect[doc.t1 | [_fetchid, a] | All]\n"));
     }
 
     @Test

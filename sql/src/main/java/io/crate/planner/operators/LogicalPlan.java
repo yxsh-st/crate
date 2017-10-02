@@ -30,7 +30,6 @@ import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
-import io.crate.planner.consumer.FetchMode;
 import io.crate.planner.projection.builder.ProjectionBuilder;
 
 import javax.annotation.Nullable;

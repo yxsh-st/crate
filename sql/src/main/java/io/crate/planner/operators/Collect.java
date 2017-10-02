@@ -77,7 +77,7 @@ import static io.crate.planner.operators.Limit.limitAndOffset;
  *  Instead it may choose to output {@link DocSysColumns#FETCHID} + {@code usedColumns}.
  *
  *  {@link FetchOrEval} will then later use {@code fetchId} to fetch the values for the columns which are "unused".
- *  See also {@link LogicalPlan.Builder#build(Set)} )}
+ *  See also {@link LogicalPlan.Builder#build(Set, FetchMode)}
  */
 class Collect implements LogicalPlan {
 

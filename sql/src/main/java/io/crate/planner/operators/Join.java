@@ -39,7 +39,6 @@ import io.crate.operation.projectors.TopN;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
 import io.crate.planner.ResultDescription;
-import io.crate.planner.consumer.FetchMode;
 import io.crate.planner.distribution.DistributionInfo;
 import io.crate.planner.node.dql.MergePhase;
 import io.crate.planner.node.dql.join.JoinType;
@@ -123,8 +122,8 @@ public class Join implements LogicalPlan {
             addColumnsFrom(usedColumns, usedFromLeft::add, lhs);
             addColumnsFrom(usedColumns, usedFromRight::add, rhs);
 
-            LogicalPlan lhsPlan = LogicalPlanner.plan(lhs, false).build(usedFromLeft, FetchMode.WITH_PROPAGATION);
-            LogicalPlan rhsPlan = LogicalPlanner.plan(rhs, false).build(usedFromRight, FetchMode.WITH_PROPAGATION);
+            LogicalPlan lhsPlan = LogicalPlanner.plan(lhs, false).build(usedFromLeft, FetchMode.PROPAGATE_USED_COLUMNS);
+            LogicalPlan rhsPlan = LogicalPlanner.plan(rhs, false).build(usedFromRight, FetchMode.PROPAGATE_USED_COLUMNS);
             LogicalPlan join = new Join(lhsPlan, rhsPlan, joinType, joinCondition);
 
             Map<Set<QualifiedName>, Symbol> queryParts = getQueryParts(where);
@@ -157,7 +156,7 @@ public class Join implements LogicalPlan {
                 }
                 addColumnsFrom(usedColumns, usedFromNext::add, nextRel);
 
-                LogicalPlan nextPlan = LogicalPlanner.plan(nextRel, false).build(usedFromNext, FetchMode.WITH_PROPAGATION);
+                LogicalPlan nextPlan = LogicalPlanner.plan(nextRel, false).build(usedFromNext, FetchMode.PROPAGATE_USED_COLUMNS);
                 join = new Join(join, nextPlan, type, condition);
                 Symbol filter = removeMatch(queryParts, joinNames, nextName);
                 if (filter != null) {

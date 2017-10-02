@@ -22,6 +22,7 @@
 
 package io.crate.planner.operators;
 
+import com.google.common.collect.Sets;
 import io.crate.analyze.OrderBy;
 import io.crate.analyze.relations.AbstractTableRelation;
 import io.crate.analyze.relations.AnalyzedRelation;
@@ -44,7 +45,6 @@ import io.crate.planner.Merge;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
 import io.crate.planner.ReaderAllocations;
-import io.crate.planner.consumer.FetchMode;
 import io.crate.planner.node.dql.QueryThenFetch;
 import io.crate.planner.node.fetch.FetchPhase;
 import io.crate.planner.node.fetch.FetchSource;
@@ -58,9 +58,11 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 /**
@@ -101,49 +103,42 @@ class FetchOrEval implements LogicalPlan {
     final LogicalPlan source;
     final List<Symbol> outputs;
 
-    private final FetchMode fetchMode;
-
     static LogicalPlan.Builder create(LogicalPlan.Builder sourceBuilder, List<Symbol> outputs) {
         return (usedBeforeNextFetch, fetchMode) -> {
             final LogicalPlan source;
-            final List<Symbol> fetchOutputs;
             switch (fetchMode) {
-                case NEVER:
-                    source = sourceBuilder.build(usedBeforeNextFetch, fetchMode);
-                    if (Symbols.containsColumn(source.outputs(), DocSysColumns.FETCHID)) {
-                        fetchOutputs = source.outputs();
-                    } else {
-                        fetchOutputs = outputs;
-                    }
+                case CLEAR_USED_COLUMNS:
+                    source = sourceBuilder.build(Collections.emptySet(), fetchMode);
                     break;
 
-                case NO_PROPAGATION:
-                    source = sourceBuilder.build(Collections.emptySet(), FetchMode.WITH_PROPAGATION);
-                    fetchOutputs = outputs;
-                    break;
-
-                case WITH_PROPAGATION:
+                case PROPAGATE_USED_COLUMNS:
                     source = sourceBuilder.build(usedBeforeNextFetch, fetchMode);
-                    if (Symbols.containsColumn(source.outputs(), DocSysColumns.FETCHID)) {
-                        fetchOutputs = source.outputs();
-                    } else {
-                        fetchOutputs = outputs;
-                    }
                     break;
 
                 default:
-                    throw new AssertionError("Unhandled fetchMode: " + fetchMode);
+                    throw new AssertionError("Unhandled FetchMode: " + fetchMode);
+            }
+
+            final List<Symbol> fetchOutputs;
+            if (Symbols.containsColumn(source.outputs(), DocSysColumns.FETCHID)) {
+                Set<Symbol> missingColumns = Sets.difference(usedBeforeNextFetch, new HashSet<>(source.outputs()));
+                if (missingColumns.isEmpty()) {
+                    fetchOutputs = source.outputs();
+                } else {
+                    fetchOutputs = outputs;
+                }
+            } else {
+                fetchOutputs = outputs;
             }
             if (source.outputs().equals(fetchOutputs)) {
                 return source;
             }
-            return new FetchOrEval(source, outputs, fetchMode);
+            return new FetchOrEval(source, outputs);
         };
     }
 
-    private FetchOrEval(LogicalPlan source, List<Symbol> outputs, FetchMode fetchMode) {
+    private FetchOrEval(LogicalPlan source, List<Symbol> outputs) {
         this.source = source;
-        this.fetchMode = fetchMode;
         this.outputs = outputs;
     }
 
@@ -330,9 +325,7 @@ class FetchOrEval implements LogicalPlan {
     }
 
     private Plan planWithEvalProjection(Planner.Context plannerContext, Plan plan, List<Symbol> sourceOutputs) {
-        // TODO: isLastFetch check here is probably not safe - would need to make sure
-        // symbols used in orderBy are not removed, or worse shuffled
-        if (plan.resultDescription().orderBy() != null && fetchMode == FetchMode.NO_PROPAGATION) {
+        if (plan.resultDescription().orderBy() != null) {
             plan = Merge.ensureOnHandler(plan, plannerContext);
         }
         InputColumns.Context ctx = new InputColumns.Context(sourceOutputs);
@@ -346,7 +339,7 @@ class FetchOrEval implements LogicalPlan {
         if (collapsed == this) {
             return this;
         }
-        return new FetchOrEval(collapsed, outputs, fetchMode);
+        return new FetchOrEval(collapsed, outputs);
     }
 
     @Override
