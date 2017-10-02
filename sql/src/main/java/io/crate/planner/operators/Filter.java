@@ -52,15 +52,15 @@ class Filter implements LogicalPlan {
         }
         if (queryClause.hasQuery()) {
             Set<Symbol> columnsInQuery = extractColumns(queryClause.query());
-            return usedColumns -> {
+            return (usedColumns, fetchMode) -> {
                 Set<Symbol> allUsedColumns = new HashSet<>();
                 allUsedColumns.addAll(columnsInQuery);
                 allUsedColumns.addAll(usedColumns);
-                return new Filter(sourceBuilder.build(allUsedColumns), queryClause);
+                return new Filter(sourceBuilder.build(allUsedColumns, fetchMode), queryClause);
             };
         }
         if (queryClause.noMatch()) {
-            return usedColumns -> new Filter(sourceBuilder.build(usedColumns), WhereClause.NO_MATCH);
+            return (usedColumns, fetchMode) -> new Filter(sourceBuilder.build(usedColumns, fetchMode), WhereClause.NO_MATCH);
         }
         return sourceBuilder;
     }

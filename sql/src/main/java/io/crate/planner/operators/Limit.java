@@ -51,8 +51,8 @@ class Limit implements LogicalPlan {
         if (limit == null && offset == null) {
             return source;
         }
-        return usedColumns -> new Limit(
-            source.build(usedColumns),
+        return (usedColumns, fetchMode) -> new Limit(
+            source.build(usedColumns, fetchMode),
             firstNonNull(limit, Literal.of(-1L)),
             firstNonNull(offset, Literal.of(0L))
         );

@@ -54,8 +54,8 @@ public class LogicalPlanner {
                      Planner.Context plannerContext,
                      ProjectionBuilder projectionBuilder,
                      FetchMode fetchMode) {
-        LogicalPlan logicalPlan = plan(queriedRelation, fetchMode, true)
-            .build(new HashSet<>(queriedRelation.outputs()))
+        LogicalPlan logicalPlan = plan(queriedRelation, true)
+            .build(new HashSet<>(queriedRelation.outputs()), fetchMode)
             .tryCollapse();
 
         Plan plan = logicalPlan.build(
@@ -69,7 +69,7 @@ public class LogicalPlanner {
         return plan;
     }
 
-    static LogicalPlan.Builder plan(QueriedRelation relation, FetchMode fetchMode, boolean isLastFetch) {
+    static LogicalPlan.Builder plan(QueriedRelation relation, boolean isLastFetch) {
         SplitPoints splitPoints = SplitPoints.create(relation.querySpec());
         LogicalPlan.Builder sourceBuilder =
             FetchOrEval.create(
@@ -91,9 +91,7 @@ public class LogicalPlanner {
                     relation.limit(),
                     relation.offset()
                 ),
-                relation.querySpec().outputs(),
-                fetchMode,
-                isLastFetch
+                relation.querySpec().outputs()
             );
         if (isLastFetch) {
             return sourceBuilder;
@@ -108,7 +106,8 @@ public class LogicalPlanner {
             return GroupHashAggregate.create(source, groupKeys, aggregates);
         }
         if (!aggregates.isEmpty()) {
-            return usedColumns -> new HashAggregate(source.build(extractColumns(aggregates)), aggregates);
+            return (usedColumns, fetchMode) ->
+                new HashAggregate(source.build(extractColumns(aggregates), fetchMode), aggregates);
         }
         return source;
     }
@@ -125,7 +124,7 @@ public class LogicalPlanner {
         if (queriedRelation instanceof QueriedSelectRelation) {
             QueriedSelectRelation selectRelation = (QueriedSelectRelation) queriedRelation;
             return Filter.create(
-                plan(selectRelation.subRelation(), FetchMode.WITH_PROPAGATION, false),
+                plan(selectRelation.subRelation(), false),
                 where
             );
         }
@@ -135,7 +134,7 @@ public class LogicalPlanner {
     private static LogicalPlan.Builder createCollect(QueriedTableRelation relation,
                                                      List<Symbol> toCollect,
                                                      WhereClause where) {
-        return usedColumns -> new Collect(relation, toCollect, where, usedColumns);
+        return (usedColumns, fetchMode) -> new Collect(relation, toCollect, where, usedColumns);
     }
 
     static Set<Symbol> extractColumns(Symbol symbol) {

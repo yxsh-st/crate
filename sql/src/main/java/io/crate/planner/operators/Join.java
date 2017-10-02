@@ -82,7 +82,7 @@ public class Join implements LogicalPlan {
     private final ArrayList<AbstractTableRelation> baseTables;
 
     static Builder createNodes(MultiSourceSelect mss, WhereClause where) {
-        return usedColumns -> {
+        return (usedColumns, fetchMode) -> {
             Iterator<AnalyzedRelation> it = mss.sources().values().iterator();
 
             QueriedRelation lhs = (QueriedRelation) it.next();
@@ -123,8 +123,8 @@ public class Join implements LogicalPlan {
             addColumnsFrom(usedColumns, usedFromLeft::add, lhs);
             addColumnsFrom(usedColumns, usedFromRight::add, rhs);
 
-            LogicalPlan lhsPlan = LogicalPlanner.plan(lhs, FetchMode.NEVER, false).build(usedFromLeft);
-            LogicalPlan rhsPlan = LogicalPlanner.plan(rhs, FetchMode.NEVER, false).build(usedFromRight);
+            LogicalPlan lhsPlan = LogicalPlanner.plan(lhs, false).build(usedFromLeft, FetchMode.WITH_PROPAGATION);
+            LogicalPlan rhsPlan = LogicalPlanner.plan(rhs, false).build(usedFromRight, FetchMode.WITH_PROPAGATION);
             LogicalPlan join = new Join(lhsPlan, rhsPlan, joinType, joinCondition);
 
             Map<Set<QualifiedName>, Symbol> queryParts = getQueryParts(where);
@@ -157,7 +157,7 @@ public class Join implements LogicalPlan {
                 }
                 addColumnsFrom(usedColumns, usedFromNext::add, nextRel);
 
-                LogicalPlan nextPlan = LogicalPlanner.plan(nextRel, FetchMode.NEVER, false).build(usedFromNext);
+                LogicalPlan nextPlan = LogicalPlanner.plan(nextRel, false).build(usedFromNext, FetchMode.WITH_PROPAGATION);
                 join = new Join(join, nextPlan, type, condition);
                 Symbol filter = removeMatch(queryParts, joinNames, nextName);
                 if (filter != null) {

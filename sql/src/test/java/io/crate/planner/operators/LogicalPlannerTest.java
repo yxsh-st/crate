@@ -53,8 +53,8 @@ public class LogicalPlannerTest extends CrateDummyClusterServiceUnitTest {
     private LogicalPlan plan(String statement) {
         SelectAnalyzedStatement analyzedStatement = sqlExecutor.analyze(statement);
         QueriedRelation relation = analyzedStatement.relation();
-        return LogicalPlanner.plan(relation, FetchMode.WITH_PROPAGATION, true)
-            .build(LogicalPlanner.extractColumns(relation.querySpec().outputs()))
+        return LogicalPlanner.plan(relation, true)
+            .build(LogicalPlanner.extractColumns(relation.querySpec().outputs()), FetchMode.NO_PROPAGATION)
             .tryCollapse();
     }
 
@@ -129,7 +129,6 @@ public class LogicalPlannerTest extends CrateDummyClusterServiceUnitTest {
                                 "Limit[10;0]\n" +
                                 "Join[\n" +
                                 "    Boundary[_fetchid, x]\n" +
-                                "    FetchOrEval[_fetchid, x]\n" +
                                 "    OrderBy[x]\n" +
                                 "    Collect[doc.t1 | [_fetchid, x] | All]\n" +
                                 "    --- INNER ---\n" +

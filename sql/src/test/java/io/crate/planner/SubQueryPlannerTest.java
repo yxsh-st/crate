@@ -61,7 +61,6 @@ public class SubQueryPlannerTest extends CrateDummyClusterServiceUnitTest {
     }
 
     @Test
-    @Ignore("LogicalPlanner doesn't propagate fetch yet")
     public void testNestedSimpleSelectUsesFetch() throws Exception {
         QueryThenFetch qtf = e.plan(
             "select x, i from (select x, i from t1 order by x asc limit 10) ti order by x desc limit 3");
@@ -69,8 +68,8 @@ public class SubQueryPlannerTest extends CrateDummyClusterServiceUnitTest {
         List<Projection> projections = collect.collectPhase().projections();
         assertThat(projections, Matchers.contains(
             instanceOf(TopNProjection.class),
-            instanceOf(TopNProjection.class),
             instanceOf(OrderedTopNProjection.class),
+            instanceOf(TopNProjection.class),
             instanceOf(FetchProjection.class)
         ));
 
@@ -79,11 +78,9 @@ public class SubQueryPlannerTest extends CrateDummyClusterServiceUnitTest {
     }
 
     @Test
-    @Ignore("LogicalPlanner doesn't propagate fetch yet")
     public void testNestedSimpleSelectWithEarlyFetchBecauseOfWhereClause() throws Exception {
-        QueryThenFetch qtf = e.plan(
+        Collect collect = e.plan(
             "select x, i from (select x, i from t1 order by x asc limit 10) ti where ti.i = 10 order by x desc limit 3");
-        Collect collect = (Collect) qtf.subPlan();
         assertThat(collect.collectPhase().projections(), Matchers.contains(
             instanceOf(TopNProjection.class),
             instanceOf(TopNProjection.class),

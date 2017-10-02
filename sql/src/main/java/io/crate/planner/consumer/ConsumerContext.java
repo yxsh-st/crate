@@ -28,7 +28,7 @@ public class ConsumerContext {
 
     private final Planner.Context plannerContext;
 
-    private FetchMode fetchMode = FetchMode.WITH_PROPAGATION;
+    private FetchMode fetchMode = FetchMode.NO_PROPAGATION;
 
     public ConsumerContext(Planner.Context plannerContext) {
         this.plannerContext = plannerContext;

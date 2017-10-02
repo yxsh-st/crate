@@ -102,42 +102,49 @@ class FetchOrEval implements LogicalPlan {
     final List<Symbol> outputs;
 
     private final FetchMode fetchMode;
-    private final boolean isLastFetch;
 
-    static LogicalPlan.Builder create(LogicalPlan.Builder sourceBuilder,
-                                      List<Symbol> outputs,
-                                      FetchMode fetchMode,
-                                      boolean isLastFetch) {
-        return usedBeforeNextFetch -> {
+    static LogicalPlan.Builder create(LogicalPlan.Builder sourceBuilder, List<Symbol> outputs) {
+        return (usedBeforeNextFetch, fetchMode) -> {
             final LogicalPlan source;
-            if (fetchMode == FetchMode.NEVER || !isLastFetch) {
-                source = sourceBuilder.build(usedBeforeNextFetch);
-            } else {
-                source = sourceBuilder.build(Collections.emptySet());
+            final List<Symbol> fetchOutputs;
+            switch (fetchMode) {
+                case NEVER:
+                    source = sourceBuilder.build(usedBeforeNextFetch, fetchMode);
+                    if (Symbols.containsColumn(source.outputs(), DocSysColumns.FETCHID)) {
+                        fetchOutputs = source.outputs();
+                    } else {
+                        fetchOutputs = outputs;
+                    }
+                    break;
+
+                case NO_PROPAGATION:
+                    source = sourceBuilder.build(Collections.emptySet(), FetchMode.WITH_PROPAGATION);
+                    fetchOutputs = outputs;
+                    break;
+
+                case WITH_PROPAGATION:
+                    source = sourceBuilder.build(usedBeforeNextFetch, fetchMode);
+                    if (Symbols.containsColumn(source.outputs(), DocSysColumns.FETCHID)) {
+                        fetchOutputs = source.outputs();
+                    } else {
+                        fetchOutputs = outputs;
+                    }
+                    break;
+
+                default:
+                    throw new AssertionError("Unhandled fetchMode: " + fetchMode);
             }
-            if (source.outputs().equals(outputs)) {
+            if (source.outputs().equals(fetchOutputs)) {
                 return source;
             }
-            return new FetchOrEval(source, outputs, fetchMode, isLastFetch);
+            return new FetchOrEval(source, outputs, fetchMode);
         };
     }
 
-    private FetchOrEval(LogicalPlan source,
-                        List<Symbol> outputs,
-                        FetchMode fetchMode,
-                        boolean isLastFetch) {
+    private FetchOrEval(LogicalPlan source, List<Symbol> outputs, FetchMode fetchMode) {
         this.source = source;
         this.fetchMode = fetchMode;
-        this.isLastFetch = isLastFetch;
-        if (isLastFetch) {
-            this.outputs = outputs;
-        } else {
-            if (Symbols.containsColumn(source.outputs(), DocSysColumns.FETCHID)) {
-                this.outputs = source.outputs();
-            } else {
-                this.outputs = outputs;
-            }
-        }
+        this.outputs = outputs;
     }
 
     @Override
@@ -325,7 +332,7 @@ class FetchOrEval implements LogicalPlan {
     private Plan planWithEvalProjection(Planner.Context plannerContext, Plan plan, List<Symbol> sourceOutputs) {
         // TODO: isLastFetch check here is probably not safe - would need to make sure
         // symbols used in orderBy are not removed, or worse shuffled
-        if (plan.resultDescription().orderBy() != null && isLastFetch) {
+        if (plan.resultDescription().orderBy() != null && fetchMode == FetchMode.NO_PROPAGATION) {
             plan = Merge.ensureOnHandler(plan, plannerContext);
         }
         InputColumns.Context ctx = new InputColumns.Context(sourceOutputs);
@@ -339,7 +346,7 @@ class FetchOrEval implements LogicalPlan {
         if (collapsed == this) {
             return this;
         }
-        return new FetchOrEval(collapsed, outputs, fetchMode, isLastFetch);
+        return new FetchOrEval(collapsed, outputs, fetchMode);
     }
 
     @Override

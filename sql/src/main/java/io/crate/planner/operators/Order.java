@@ -50,11 +50,11 @@ class Order implements LogicalPlan {
         if (orderBy == null) {
             return source;
         }
-        return usedColumns -> {
+        return (usedColumns, fetchMode) -> {
             Set<Symbol> allUsedColumns = new HashSet<>();
             allUsedColumns.addAll(orderBy.orderBySymbols());
             allUsedColumns.addAll(usedColumns);
-            return new Order(source.build(allUsedColumns), orderBy);
+            return new Order(source.build(allUsedColumns, fetchMode), orderBy);
         };
     }
 

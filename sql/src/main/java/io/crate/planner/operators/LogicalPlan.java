@@ -30,6 +30,7 @@ import io.crate.analyze.symbol.Symbol;
 import io.crate.collections.Lists2;
 import io.crate.planner.Plan;
 import io.crate.planner.Planner;
+import io.crate.planner.consumer.FetchMode;
 import io.crate.planner.projection.builder.ProjectionBuilder;
 
 import javax.annotation.Nullable;
@@ -120,7 +121,7 @@ public interface LogicalPlan {
          *                         outputs: [_fetch, a]
          *                    </pre>
          */
-        LogicalPlan build(Set<Symbol> usedBeforeNextFetch);
+        LogicalPlan build(Set<Symbol> usedBeforeNextFetch, FetchMode fetchMode);
     }
 
     /**

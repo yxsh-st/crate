@@ -58,12 +58,12 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static io.crate.planner.operators.Limit.limitAndOffset;
-import static io.crate.planner.operators.LogicalPlanner.extractColumns;
 
 /**
  * An Operator for data-collection.
@@ -99,7 +99,7 @@ class Collect implements LogicalPlan {
         AbstractTableRelation tableRelation = relation.tableRelation();
         this.tableInfo = relation.tableRelation().tableInfo();
         if (tableRelation instanceof DocTableRelation) {
-            Set<Symbol> colsToCollect = extractColumns(toCollect);
+            Set<Symbol> colsToCollect = new HashSet<>(toCollect);
             Sets.SetView<Symbol> unusedCols = Sets.difference(colsToCollect, usedBeforeNextFetch);
             this.toCollect = generateToCollectWithFetch(tableInfo.ident(), toCollect, unusedCols, usedBeforeNextFetch);
         } else {
