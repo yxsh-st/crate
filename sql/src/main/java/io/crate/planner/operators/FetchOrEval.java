@@ -108,7 +108,7 @@ class FetchOrEval implements LogicalPlan {
             final LogicalPlan source;
             switch (fetchMode) {
                 case CLEAR_USED_COLUMNS:
-                    source = sourceBuilder.build(Collections.emptySet(), fetchMode);
+                    source = sourceBuilder.build(Collections.emptySet(), FetchMode.PROPAGATE_USED_COLUMNS);
                     break;
 
                 case PROPAGATE_USED_COLUMNS:

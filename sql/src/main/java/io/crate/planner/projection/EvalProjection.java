@@ -45,7 +45,7 @@ public class EvalProjection extends Projection {
 
     public EvalProjection(List<Symbol> outputs) {
         assert outputs.stream().noneMatch(s -> SymbolVisitors.any(Symbols.IS_COLUMN, s))
-            : "EvalProjection doesn't support Field or Reference symbols";
+            : "EvalProjection doesn't support Field or Reference symbols. Got: " + outputs;
         this.outputs = outputs;
     }
 

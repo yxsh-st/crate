@@ -61,6 +61,6 @@ public class SplitPointsTest extends CrateDummyClusterServiceUnitTest {
         //noinspection unchecked
         assertThat(splitPoints.toCollect(), contains(isFunction("coalesce")));
         //noinspection unchecked
-        assertThat(splitPoints.aggregates(), contains(isFunction("sum"), isFunction("sum")));
+        assertThat(splitPoints.aggregates(), contains(isFunction("sum")));
     }
 }
