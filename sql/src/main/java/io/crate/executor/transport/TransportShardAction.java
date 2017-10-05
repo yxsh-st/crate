@@ -144,7 +144,7 @@ public abstract class TransportShardAction<Request extends ShardRequest<Request,
         }
     }
 
-    protected abstract WritePrimaryResult<Request, ShardResponse> processRequestItems(IndexShard indexShard, Request request, AtomicBoolean killed) throws InterruptedException, IOException;
+    protected abstract WritePrimaryResult<Request, ShardResponse> processRequestItems(IndexShard indexShard, Request request, AtomicBoolean killed) throws Exception;
 
     protected abstract WriteReplicaResult<Request> processRequestItemsOnReplica(IndexShard indexShard, Request replicaRequest) throws IOException;
 

@@ -22,7 +22,6 @@
 package io.crate.executor.transport;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import io.crate.Constants;
 import io.crate.analyze.ConstraintsValidator;
@@ -140,7 +139,7 @@ public class TransportShardUpsertAction extends TransportShardAction<ShardUpsert
     @Override
     protected WritePrimaryResult<ShardUpsertRequest, ShardResponse> processRequestItems(IndexShard indexShard,
                                                                                         ShardUpsertRequest request,
-                                                                                        AtomicBoolean killed) throws InterruptedException {
+                                                                                        AtomicBoolean killed) throws Exception {
         ShardResponse shardResponse = new ShardResponse();
         DocTableInfo tableInfo = schemas.getTableInfo(TableIdent.fromIndexName(request.index()), Operation.INSERT);
 
@@ -159,6 +158,8 @@ public class TransportShardUpsertAction extends TransportShardAction<ShardUpsert
                 shardResponse.failure(new InterruptedException());
                 break;
             }
+            long version = item.version();
+            VersionType versionType = item.versionType();
             try {
                 translogLocation = indexItem(
                     tableInfo,
@@ -171,10 +172,14 @@ public class TransportShardUpsertAction extends TransportShardAction<ShardUpsert
                 shardResponse.add(location);
             } catch (Exception e) {
                 if (retryPrimaryException(e)) {
-                    Throwables.propagate(e);
+                    item.version(version);
+                    item.versionType(versionType);
+                    throw e;
                 }
-                logger.debug("{} failed to execute upsert for [{}]/[{}]",
-                    e, request.shardId(), request.type(), item.id());
+                if (logger.isDebugEnabled()) {
+                    logger.debug("{} failed to execute upsert for [{}]/[{}]",
+                        e, request.shardId(), request.type(), item.id());
+                }
 
                 // *mark* the item as failed by setting the source to null
                 // to prevent the replica operation from processing this concrete item
