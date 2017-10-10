@@ -38,6 +38,7 @@ import java.util.function.Function;
  * - {@link #rightJoin(BatchIterator, BatchIterator, Function)}
  * - {@link #fullOuterJoin(BatchIterator, BatchIterator, Function)}
  * - {@link #semiJoin(BatchIterator, BatchIterator, Function)}
+ * - {@link #antiJoin(BatchIterator, BatchIterator, Function)}
  */
 public class NestedLoopBatchIterator implements BatchIterator {
 
