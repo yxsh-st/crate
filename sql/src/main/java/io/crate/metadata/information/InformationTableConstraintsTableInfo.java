@@ -31,6 +31,7 @@ import io.crate.metadata.RowContextCollectorExpression;
 import io.crate.metadata.RowGranularity;
 import io.crate.metadata.TableIdent;
 import io.crate.metadata.expressions.RowCollectExpressionFactory;
+import io.crate.metadata.table.ConstraintInfo;
 import io.crate.metadata.table.TableInfo;
 import io.crate.types.ArrayType;
 import io.crate.types.DataType;
@@ -45,7 +46,6 @@ public class InformationTableConstraintsTableInfo extends InformationTableInfo {
 
     public static final String NAME = "table_constraints";
     public static final TableIdent IDENT = new TableIdent(InformationSchemaInfo.NAME, NAME);
-    private static final BytesRef PRIMARY_KEY = new BytesRef("PRIMARY_KEY");
 
     public static class Columns {
         static final ColumnIdent CONSTRAINT_CATALOG = new ColumnIdent("constraint_catalog");
@@ -71,29 +71,22 @@ public class InformationTableConstraintsTableInfo extends InformationTableInfo {
         static final Reference INITIALLY_DEFERRED = createRef(Columns.INITIALLY_DEFERRED, DataTypes.STRING);
     }
 
-    public static Map<ColumnIdent, RowCollectExpressionFactory<TableInfo>> expressions() {
-        return ImmutableMap.<ColumnIdent, RowCollectExpressionFactory<TableInfo>>builder()
+    public static Map<ColumnIdent, RowCollectExpressionFactory<ConstraintInfo>> expressions() {
+        return ImmutableMap.<ColumnIdent, RowCollectExpressionFactory<ConstraintInfo>>builder()
             .put(Columns.CONSTRAINT_CATALOG,
-                () -> RowContextCollectorExpression.objToBytesRef(r -> r.ident().schema()))
+                () -> RowContextCollectorExpression.objToBytesRef(r -> r.tableIdent().schema()))
             .put(Columns.CONSTRAINT_SCHEMA,
-                () -> RowContextCollectorExpression.objToBytesRef(r -> r.ident().schema()))
+                () -> RowContextCollectorExpression.objToBytesRef(r -> r.tableIdent().schema()))
             .put(Columns.CONSTRAINT_NAME,
-                () -> RowContextCollectorExpression.forFunction(row -> {
-                    BytesRef[] values = new BytesRef[row.primaryKey().size()];
-                    List<ColumnIdent> primaryKey = row.primaryKey();
-                    for (int i = 0, primaryKeySize = primaryKey.size(); i < primaryKeySize; i++) {
-                        values[i] = new BytesRef(primaryKey.get(i).fqn());
-                    }
-                    return values[0];
-                }))
+                () -> RowContextCollectorExpression.objToBytesRef(r -> r.columnIdent().name()))
             .put(Columns.TABLE_CATALOG,
-                () -> RowContextCollectorExpression.objToBytesRef(r -> r.ident().schema()))
+                () -> RowContextCollectorExpression.objToBytesRef(r -> r.tableIdent().schema()))
             .put(Columns.TABLE_SCHEMA,
-                () -> RowContextCollectorExpression.objToBytesRef(r -> r.ident().schema()))
+                () -> RowContextCollectorExpression.objToBytesRef(r -> r.tableIdent().schema()))
             .put(Columns.TABLE_NAME,
-                () -> RowContextCollectorExpression.objToBytesRef(r -> r.ident().name()))
+                () -> RowContextCollectorExpression.objToBytesRef(r -> r.tableIdent().name()))
             .put(Columns.CONSTRAINT_TYPE,
-                () -> RowContextCollectorExpression.objToBytesRef(r -> PRIMARY_KEY))
+                () -> RowContextCollectorExpression.objToBytesRef(r -> r.constraintType()))
             .put(Columns.IS_DEFERRABLE,
                 () -> RowContextCollectorExpression.objToBytesRef(r -> "NO"))
             .put(Columns.INITIALLY_DEFERRED,

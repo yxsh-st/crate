@@ -22,6 +22,7 @@
 package io.crate.operation.collect.sources;
 
 import com.google.common.collect.FluentIterable;
+import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.FulltextAnalyzerResolver;
 import io.crate.metadata.IndexParts;
 import io.crate.metadata.IngestionRuleInfo;
@@ -33,6 +34,7 @@ import io.crate.metadata.RoutineInfo;
 import io.crate.metadata.RoutineInfos;
 import io.crate.metadata.Schemas;
 import io.crate.metadata.rule.ingest.IngestRulesMetaData;
+import io.crate.metadata.table.ConstraintInfo;
 import io.crate.metadata.table.SchemaInfo;
 import io.crate.metadata.table.TableInfo;
 import io.crate.operation.collect.files.SqlFeatureContext;
@@ -60,7 +62,7 @@ public class InformationSchemaIterables implements ClusterStateListener {
     private final FluentIterable<TableInfo> tablesIterable;
     private final PartitionInfos partitionInfos;
     private final FluentIterable<ColumnContext> columnsIterable;
-    private final FluentIterable<TableInfo> constraints;
+    private final FluentIterable<ConstraintInfo> constraints;
     private final SqlFeaturesIterable sqlFeatures;
     private final FluentIterable<Void> keyColumnUsages;
     private final FluentIterable<Void> referentialConstraints;
@@ -81,7 +83,8 @@ public class InformationSchemaIterables implements ClusterStateListener {
         partitionInfos = new PartitionInfos(clusterService);
         columnsIterable = tablesIterable.transformAndConcat(ColumnsIterable::new);
 
-        constraints = tablesIterable.filter(i -> i != null && i.primaryKey().size() > 0);
+        constraints = tablesIterable.filter(i -> i != null && i.primaryKey().size() > 0)
+            .transformAndConcat(ConstraintsIterable::new);
 
         sqlFeatures = new SqlFeaturesIterable();
         keyColumnUsages = FluentIterable.from(Collections.emptyList());
@@ -107,7 +110,7 @@ public class InformationSchemaIterables implements ClusterStateListener {
         return columnsIterable;
     }
 
-    public Iterable<TableInfo> constraints() {
+    public Iterable<ConstraintInfo> constraints() {
         return constraints;
     }
 
@@ -147,6 +150,54 @@ public class InformationSchemaIterables implements ClusterStateListener {
             metaData.custom(UserDefinedFunctionsMetaData.TYPE));
         routines = FluentIterable.from(routineInfos).filter(Objects::nonNull);
         ingestionRules = new IngestionRuleInfos(metaData.custom(IngestRulesMetaData.TYPE));
+    }
+
+    /**
+     * Iterable for getting for extracting column constraints from table info.
+     */
+    static class ConstraintsIterable implements Iterable<ConstraintInfo> {
+
+        private final TableInfo ti;
+
+        ConstraintsIterable(TableInfo ti) {
+            this.ti = ti;
+        }
+
+        @Override
+        public Iterator<ConstraintInfo> iterator() {
+            return new ConstraintIterator(ti);
+        }
+    }
+
+    /**
+     * Iterator that returns ConstraintInfos for each TableInfo.
+     */
+    static class ConstraintIterator implements Iterator<ConstraintInfo> {
+        private final TableInfo tableInfo;
+        private final Iterator<ColumnIdent> primaryKeyIterator;
+
+        ConstraintIterator(TableInfo tableInfo) {
+            this.tableInfo = tableInfo;
+            this.primaryKeyIterator =  tableInfo.primaryKey().iterator();
+        }
+
+        // TODO: NOTNULLCONSTRAINT
+        @Override
+        public boolean hasNext() {
+            return primaryKeyIterator.hasNext();
+        }
+
+        @Override
+        public ConstraintInfo next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException("Primary Key iterator exhausted");
+            }
+
+            return new ConstraintInfo(
+                this.tableInfo.ident(),
+                primaryKeyIterator.next(),
+                ConstraintInfo.Constraint.PRIMARY_KEY);
+        }
     }
 
     static class ColumnsIterable implements Iterable<ColumnContext> {
