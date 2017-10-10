@@ -28,7 +28,6 @@ import java.util.Optional;
 
 public class AlterTableAnalyzedStatement implements DDLStatement {
 
-
     private final DocTableInfo tableInfo;
     private final PartitionName partitionName;
     private final TableParameter tableParameter;
