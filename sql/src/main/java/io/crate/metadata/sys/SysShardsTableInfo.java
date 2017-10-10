@@ -31,6 +31,7 @@ import io.crate.metadata.Reference;
 import io.crate.metadata.ReferenceIdent;
 import io.crate.metadata.ReferenceImplementation;
 import io.crate.metadata.Routing;
+import io.crate.metadata.RoutingProvider;
 import io.crate.metadata.RowContextCollectorExpression;
 import io.crate.metadata.RowGranularity;
 import io.crate.metadata.TableIdent;
@@ -48,7 +49,6 @@ import io.crate.types.ObjectType;
 import io.crate.types.StringType;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.routing.GroupShardsIterator;
-import org.elasticsearch.cluster.routing.OperationRouting;
 import org.elasticsearch.cluster.routing.ShardIterator;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.index.shard.ShardId;
@@ -289,7 +289,7 @@ public class SysShardsTableInfo extends StaticTableInfo {
      */
     @Override
     public Routing getRouting(ClusterState clusterState,
-                              OperationRouting operationRouting,
+                              RoutingProvider routingProvider,
                               WhereClause whereClause,
                               @Nullable String preference,
                               SessionContext sessionContext) {

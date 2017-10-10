@@ -32,6 +32,7 @@ import io.crate.metadata.FunctionIdent;
 import io.crate.metadata.FunctionImplementation;
 import io.crate.metadata.FunctionInfo;
 import io.crate.metadata.Routing;
+import io.crate.metadata.RoutingProvider;
 import io.crate.metadata.RowGranularity;
 import io.crate.metadata.Signature;
 import io.crate.metadata.TableIdent;
@@ -41,7 +42,6 @@ import io.crate.metadata.tablefunctions.TableFunctionImplementation;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
 import org.elasticsearch.cluster.ClusterState;
-import org.elasticsearch.cluster.routing.OperationRouting;
 
 import javax.annotation.Nullable;
 import java.util.Collection;
@@ -84,7 +84,7 @@ public class EmptyRowTableFunction {
 
                 @Override
                 public Routing getRouting(ClusterState clusterState,
-                                          OperationRouting operationRouting,
+                                          RoutingProvider routingProvider,
                                           WhereClause whereClause,
                                           @Nullable String preference,
                                           SessionContext sessionContext) {

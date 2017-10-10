@@ -30,6 +30,7 @@ import io.crate.metadata.ColumnIdent;
 import io.crate.metadata.FunctionIdent;
 import io.crate.metadata.FunctionInfo;
 import io.crate.metadata.Routing;
+import io.crate.metadata.RoutingProvider;
 import io.crate.metadata.TableIdent;
 import io.crate.metadata.table.TableInfo;
 import io.crate.metadata.table.TestingTableInfo;
@@ -42,10 +43,11 @@ import java.util.Arrays;
 import java.util.List;
 
 import static io.crate.analyze.TableDefinitions.shardRouting;
-import static io.crate.analyze.TableDefinitions.shardRoutingForReplicas;
 import static org.hamcrest.Matchers.is;
 
 public class RoutingBuilderTest extends CrateDummyClusterServiceUnitTest {
+
+    private RoutingProvider routingProvider = new RoutingProvider(0, new String[0]);
 
     @Test
     public void testAllocateRouting() throws Exception {
@@ -53,9 +55,9 @@ public class RoutingBuilderTest extends CrateDummyClusterServiceUnitTest {
         TableInfo tableInfo1 =
             TestingTableInfo.builder(custom, shardRouting("t1")).add("id", DataTypes.INTEGER, null).build();
         TableInfo tableInfo2 =
-            TestingTableInfo.builder(custom, shardRoutingForReplicas("t1")).add("id", DataTypes.INTEGER, null).build();
+            TestingTableInfo.builder(custom, shardRouting("t1")).add("id", DataTypes.INTEGER, null).build();
 
-        RoutingBuilder routingBuilder = new RoutingBuilder(clusterService.state(), clusterService.operationRouting());
+        RoutingBuilder routingBuilder = new RoutingBuilder(clusterService.state(), routingProvider);
         WhereClause whereClause = new WhereClause(
             new Function(new FunctionInfo(
                 new FunctionIdent(EqOperator.NAME,
@@ -71,7 +73,8 @@ public class RoutingBuilderTest extends CrateDummyClusterServiceUnitTest {
         List<RoutingBuilder.TableRouting> tableRoutings = routingBuilder.routingListByTable.get(custom);
         assertThat(tableRoutings.size(), is(2));
 
-        // The routings must be the same after merging the locations
+        // The routings are the same because the RoutingProvider enforces this - this test doesn't reflect that fact
+        // currently because the used routing are stubbed via the TestingTableInfo
         Routing routing1 = tableRoutings.get(0).routing;
         Routing routing2 = tableRoutings.get(1).routing;
         assertThat(routing1, is(routing2));
@@ -82,7 +85,7 @@ public class RoutingBuilderTest extends CrateDummyClusterServiceUnitTest {
         TableIdent custom = new TableIdent("custom", "t1");
         TableInfo tableInfo = TestingTableInfo.builder(
             custom, shardRouting("t1")).add("id", DataTypes.INTEGER, null).build();
-        RoutingBuilder routingBuilder = new RoutingBuilder(clusterService.state(), clusterService.operationRouting());
+        RoutingBuilder routingBuilder = new RoutingBuilder(clusterService.state(), routingProvider);
         routingBuilder.allocateRouting(tableInfo, WhereClause.MATCH_ALL, null, null);
 
         ReaderAllocations readerAllocations = routingBuilder.buildReaderAllocations();

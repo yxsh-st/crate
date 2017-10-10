@@ -4,6 +4,7 @@ import io.crate.action.sql.SessionContext;
 import io.crate.analyze.EvaluatingNormalizer;
 import io.crate.analyze.WhereClause;
 import io.crate.metadata.PartitionName;
+import io.crate.metadata.RoutingProvider;
 import io.crate.metadata.Schemas;
 import io.crate.metadata.TableIdent;
 import io.crate.metadata.TransactionContext;
@@ -83,7 +84,7 @@ public class PlannerTest extends CrateDummyClusterServiceUnitTest {
         Planner.Context plannerContext = new Planner.Context(
             e.planner,
             clusterService.state(),
-            clusterService.operationRouting(),
+            new RoutingProvider(0, new String[0]),
             UUID.randomUUID(),
             null,
             normalizer,

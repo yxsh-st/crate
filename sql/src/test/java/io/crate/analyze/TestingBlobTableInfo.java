@@ -27,11 +27,11 @@ import io.crate.Version;
 import io.crate.action.sql.SessionContext;
 import io.crate.metadata.IndexMappings;
 import io.crate.metadata.Routing;
+import io.crate.metadata.RoutingProvider;
 import io.crate.metadata.TableIdent;
 import io.crate.metadata.blob.BlobTableInfo;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.cluster.ClusterState;
-import org.elasticsearch.cluster.routing.OperationRouting;
 
 import javax.annotation.Nullable;
 
@@ -62,7 +62,7 @@ class TestingBlobTableInfo extends BlobTableInfo {
 
     @Override
     public Routing getRouting(ClusterState state,
-                              OperationRouting operationRouting,
+                              RoutingProvider routingProvider,
                               WhereClause whereClause,
                               @Nullable String preference,
                               SessionContext sessionContext) {

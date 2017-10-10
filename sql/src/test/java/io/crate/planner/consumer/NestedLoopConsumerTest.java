@@ -32,6 +32,7 @@ import io.crate.analyze.symbol.AggregateMode;
 import io.crate.analyze.symbol.Symbol;
 import io.crate.metadata.Functions;
 import io.crate.metadata.Routing;
+import io.crate.metadata.RoutingProvider;
 import io.crate.metadata.TableIdent;
 import io.crate.metadata.TransactionContext;
 import io.crate.metadata.doc.DocSchemaInfo;
@@ -104,7 +105,7 @@ public class NestedLoopConsumerTest extends CrateDummyClusterServiceUnitTest {
         plannerContext = new Planner.Context(
             e.planner,
             clusterService.state(),
-            clusterService.operationRouting(),
+            new RoutingProvider(0, new String[0]),
             UUID.randomUUID(),
             new ConsumingPlanner(clusterService, functions, tableStats),
             normalizer,
